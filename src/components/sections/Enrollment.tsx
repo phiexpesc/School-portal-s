@@ -1,59 +1,69 @@
-import { useState } from 'react';
-import { X, GraduationCap, Check, Clock, AlertCircle, Plus, RefreshCw, User, FileText, Calendar } from 'lucide-react';
-import type { Enrollment } from '@/types';
+import { useState, useEffect } from 'react';
+import { X, Plus, Clock, CheckCircle, XCircle, Loader2, GraduationCap } from 'lucide-react';
+import type { Enrollment, User } from '@/types';
+import { INDIVIDUAL_GRADES } from '@/types';
 
 interface EnrollmentProps {
   isOpen: boolean;
   onClose: () => void;
-  studentName: string;
+  currentUser: User;
   enrollments: Enrollment[];
-  onEnroll: (gradeLevel: string, reason: string) => void;
-  onRetry?: (enrollmentId: string) => void;
   isAdmin?: boolean;
+  students?: User[];
+  onAddEnrollment?: (studentId: string, studentName: string, gradeLevel: string, notes?: string) => Promise<void>;
+  onUpdateEnrollment?: (id: string, updates: Partial<Enrollment>) => Promise<void>;
+  onRetry?: (enrollment: Enrollment) => void;
+  getEnrollments: () => Promise<Enrollment[]>;
+  getStudentEnrollments: (studentId: string) => Promise<Enrollment[]>;
 }
-
-const GRADE_LEVELS = [
-  { value: 'Grade 7', label: 'Grade 7 (High School - Junior)' },
-  { value: 'Grade 8', label: 'Grade 8 (High School - Junior)' },
-  { value: 'Grade 9', label: 'Grade 9 (High School - Junior)' },
-  { value: 'Grade 10', label: 'Grade 10 (High School - Junior)' },
-  { value: 'Grade 11', label: 'Grade 11 (Senior High School)' },
-  { value: 'Grade 12', label: 'Grade 12 (Senior High School)' }
-];
 
 export function EnrollmentModal({
   isOpen,
   onClose,
-  studentName,
-  enrollments,
-  onEnroll,
+  currentUser,
+  enrollments: initialEnrollments,
+  isAdmin = false,
+  students = [],
+  onAddEnrollment,
+  onUpdateEnrollment,
   onRetry,
-  isAdmin = false
+  getEnrollments,
+  getStudentEnrollments
 }: EnrollmentProps) {
-  const [selectedGrade, setSelectedGrade] = useState('');
-  const [reason, setReason] = useState('');
+  const [enrollments, setEnrollments] = useState<Enrollment[]>(initialEnrollments);
   const [showForm, setShowForm] = useState(false);
+  const [selectedGrade, setSelectedGrade] = useState(INDIVIDUAL_GRADES[0]);
+  const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Load enrollments from Firebase
+  useEffect(() => {
+    const loadEnrollments = async () => {
+      try {
+        const data = isAdmin 
+          ? await getEnrollments() 
+          : await getStudentEnrollments(currentUser.id);
+        setEnrollments(data);
+      } catch (error) {
+        console.error('Error loading enrollments:', error);
+      }
+    };
+
+    if (isOpen) {
+      loadEnrollments();
+    }
+  }, [isOpen, isAdmin, currentUser.id, getEnrollments, getStudentEnrollments]);
 
   if (!isOpen) return null;
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (selectedGrade && reason) {
-      onEnroll(selectedGrade, reason);
-      setSelectedGrade('');
-      setReason('');
-      setShowForm(false);
-    }
-  };
 
   const getStatusIcon = (status: Enrollment['status']) => {
     switch (status) {
       case 'approved':
-        return <Check size={16} className="text-green-600" />;
+        return <CheckCircle className="w-5 h-5 text-green-600" />;
       case 'pending':
-        return <Clock size={16} className="text-yellow-600" />;
+        return <Clock className="w-5 h-5 text-yellow-600" />;
       case 'rejected':
-        return <AlertCircle size={16} className="text-red-600" />;
+        return <XCircle className="w-5 h-5 text-red-600" />;
     }
   };
 
@@ -68,158 +78,205 @@ export function EnrollmentModal({
     }
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onAddEnrollment) return;
+
+    setIsSubmitting(true);
+    try {
+      await onAddEnrollment(currentUser.id, currentUser.name, selectedGrade, notes);
+      const data = await getStudentEnrollments(currentUser.id);
+      setEnrollments(data);
+      setShowForm(false);
+      setNotes('');
+    } catch (error) {
+      console.error('Error submitting enrollment:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStatusUpdate = async (id: string, status: 'approved' | 'rejected') => {
+    if (!onUpdateEnrollment) return;
+    
+    try {
+      await onUpdateEnrollment(id, { status });
+      const data = await getEnrollments();
+      setEnrollments(data);
+    } catch (error) {
+      console.error('Error updating enrollment:', error);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="card p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+      <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[var(--accent)] border-[3px] border-[rgba(26,26,26,0.85)] flex items-center justify-center">
-              <GraduationCap size={20} />
-            </div>
-            <div>
-              <h3 className="text-lg sm:text-xl font-bold" style={{ fontFamily: 'var(--font-heading)' }}>
-                Student Enrollment
-              </h3>
-              <p className="text-xs text-[var(--text-secondary)]">
-                {isAdmin ? `Managing applications for ${studentName}` : 'Apply for school enrollment'}
-              </p>
-            </div>
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <div>
+            <h3 className="text-2xl font-bold text-[#1a1a1a]">Student Enrollment</h3>
+            <p className="text-gray-500 mt-1">
+              {isAdmin ? 'Managing applications' : 'Apply for school enrollment'}
+            </p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-100 transition-colors"
+            className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
           >
-            <X size={20} />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Enrollment Applications */}
-        <div className="mb-6">
-          <h4 className="font-bold mb-3 text-sm" style={{ fontFamily: 'var(--font-heading)' }}>
-            My Applications ({enrollments.length})
-          </h4>
-          
-          {enrollments.length === 0 ? (
-            <div className="text-center py-6 bg-[var(--bg-primary)] rounded-xl border-[2px] border-dashed border-[rgba(26,26,26,0.2)]">
-              <User size={32} className="mx-auto mb-2 text-[var(--text-secondary)]" />
-              <p className="text-sm text-[var(--text-secondary)]">
-                No applications yet. Submit your enrollment application below!
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {enrollments.map((enrollment) => (
-                <div
-                  key={enrollment.id}
-                  className="card p-3"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${getStatusColor(enrollment.status)}`}>
-                        {getStatusIcon(enrollment.status)}
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm">{enrollment.course} Grade Level</p>
-                        <p className="text-xs text-[var(--text-secondary)]">
-                          <Calendar size={10} className="inline mr-1" />
-                          {new Date(enrollment.enrollmentDate).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${getStatusColor(enrollment.status)}`}>
-                      {enrollment.status}
-                    </span>
-                  </div>
-                  {enrollment.notes && (
-                    <div className="mt-2 p-2 bg-[var(--bg-primary)] rounded-lg">
-                      <p className="text-xs text-[var(--text-secondary)]">
-                        <FileText size={10} className="inline mr-1" />
-                        {enrollment.notes}
-                      </p>
-                    </div>
-                  )}
-                  {enrollment.status === 'rejected' && onRetry && (
-                    <div className="mt-2 flex justify-end">
-                      <button
-                        onClick={() => onRetry(enrollment.id)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--card-yellow)] hover:bg-[var(--accent)] transition-colors text-xs font-bold"
-                      >
-                        <RefreshCw size={12} />
-                        Retry Application
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {/* Enrollments List */}
+          <div className="mb-8">
+            <h4 className="font-bold text-[#1a1a1a] mb-4">
+              {isAdmin ? 'All Applications' : `My Applications (${enrollments.length})`}
+            </h4>
 
-        {/* Enrollment Form */}
-        {!isAdmin && (
-          <div>
-            {!showForm ? (
-              <button
-                onClick={() => setShowForm(true)}
-                className="w-full btn-primary flex items-center justify-center gap-2"
-              >
-                <Plus size={16} />
-                New Enrollment Application
-              </button>
+            {enrollments.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-2xl">
+                <GraduationCap className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p>No applications yet.</p>
+                {!isAdmin && <p className="text-sm">Submit your enrollment application below!</p>}
+              </div>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-3">
-                <div>
-                  <label className="micro-label block text-xs mb-1">Grade Level</label>
-                  <select
-                    value={selectedGrade}
-                    onChange={(e) => setSelectedGrade(e.target.value)}
-                    className="input-field text-sm"
-                    required
+              <div className="space-y-3">
+                {enrollments.map((enrollment) => (
+                  <div
+                    key={enrollment.id}
+                    className="bg-gray-50 rounded-2xl p-5"
                   >
-                    <option value="">Select grade level...</option>
-                    {GRADE_LEVELS.map(grade => (
-                      <option key={grade.value} value={grade.value}>{grade.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="micro-label block text-xs mb-1">Reason for Enrollment</label>
-                  <textarea
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    className="input-field text-sm w-full min-h-[80px] resize-none"
-                    placeholder="Please tell us why you want to enroll..."
-                    required
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForm(false)}
-                    className="flex-1 btn-secondary text-sm"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!selectedGrade || !reason}
-                    className="flex-1 btn-primary text-sm disabled:opacity-50"
-                  >
-                    Submit Application
-                  </button>
-                </div>
-              </form>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        {getStatusIcon(enrollment.status)}
+                        <div>
+                          <div className="font-bold text-[#1a1a1a]">
+                            {isAdmin ? enrollment.studentName : enrollment.course}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {new Date(enrollment.enrollmentDate).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium capitalize ${getStatusColor(enrollment.status)}`}>
+                        {enrollment.status}
+                      </span>
+                    </div>
+
+                    {isAdmin && (
+                      <div className="text-sm text-gray-600 mb-3">
+                        Grade Level: {enrollment.course}
+                      </div>
+                    )}
+
+                    {enrollment.notes && (
+                      <div className="text-sm text-gray-600 bg-white rounded-xl p-3 mb-3">
+                        {enrollment.notes}
+                      </div>
+                    )}
+
+                    {enrollment.status === 'rejected' && onRetry && !isAdmin && (
+                      <button
+                        onClick={() => onRetry(enrollment)}
+                        className="text-sm text-blue-600 hover:underline"
+                      >
+                        Reapply with updated information
+                      </button>
+                    )}
+
+                    {isAdmin && enrollment.status === 'pending' && (
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => handleStatusUpdate(enrollment.id, 'approved')}
+                          className="flex-1 py-2 rounded-lg bg-green-500 text-white text-sm font-medium hover:bg-green-600 transition-colors"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleStatusUpdate(enrollment.id, 'rejected')}
+                          className="flex-1 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-        )}
 
-        {/* Info */}
-        <div className="mt-4 p-3 bg-[var(--card-mint)] rounded-xl">
-          <p className="text-xs text-[var(--text-secondary)]">
-            <strong>Note:</strong> Enrollment applications require admin approval. 
-            You will be notified once your application is reviewed.
-          </p>
+          {/* Enrollment Form */}
+          {!isAdmin && (
+            <div>
+              {!showForm ? (
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="w-full py-3 rounded-xl bg-[#1a1a1a] text-white font-medium hover:bg-[#2a2a2a] transition-colors flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-5 h-5" />
+                  New Application
+                </button>
+              ) : (
+                <form onSubmit={handleSubmit} className="bg-gray-50 rounded-2xl p-5 space-y-4">
+                  <h4 className="font-bold text-[#1a1a1a]">New Enrollment Application</h4>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Grade Level
+                    </label>
+                    <select
+                      value={selectedGrade}
+                      onChange={(e) => setSelectedGrade(e.target.value)}
+                      className="w-full h-12 rounded-xl border-2 border-[rgba(26,26,26,0.1)] px-4"
+                    >
+                      {INDIVIDUAL_GRADES.map((grade) => (
+                        <option key={grade} value={grade}>{grade}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Reason for Enrollment (optional)
+                    </label>
+                    <textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      className="w-full h-24 rounded-xl border-2 border-[rgba(26,26,26,0.1)] px-4 py-3 resize-none"
+                      placeholder="Tell us why you want to enroll..."
+                    />
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="flex-1 py-3 rounded-xl bg-[#1a1a1a] text-white font-medium hover:bg-[#2a2a2a] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Submitting...
+                        </>
+                      ) : (
+                        'Submit Application'
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowForm(false)}
+                      className="flex-1 py-3 rounded-xl bg-gray-200 text-gray-700 font-medium hover:bg-gray-300 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
