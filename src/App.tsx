@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { ArrowLeft, FileText, Shield, QrCode, Check, AlertCircle, BookOpen, TrendingUp } from 'lucide-react';
+import { ArrowLeft, FileText, Shield, QrCode, Check, AlertCircle, BookOpen, TrendingUp, X } from 'lucide-react';
 import { Navbar } from '@/components/navigation/Navbar';
 import { Login } from '@/components/sections/Login';
 import { Hero } from '@/components/sections/Hero';
@@ -26,6 +26,7 @@ import { AttendanceModal } from '@/components/sections/Attendance';
 import { StudentAttendanceModal } from '@/components/sections/StudentAttendance';
 import { Ticket, Users, Clock, Plus, MessageSquare, CalendarDays } from 'lucide-react';
 import { useStore } from '@/hooks/useStore';
+import { useLoading } from '@/contexts/LoadingContext';
 import type { View, Book } from '@/types';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -166,7 +167,18 @@ function App() {
   const [showSections, setShowSections] = useState(false);
   const [showAttendance, setShowAttendance] = useState(false);
   const [showStudentAttendance, setShowStudentAttendance] = useState(false);
+  const [showDataNotice, setShowDataNotice] = useState(() => {
+    // Check if user has already dismissed the notice
+    return !localStorage.getItem('schoolPortalDataNoticeDismissed');
+  });
   const mainRef = useRef<HTMLDivElement>(null);
+
+  const { startLoading, stopLoading } = useLoading();
+
+  const dismissDataNotice = () => {
+    localStorage.setItem('schoolPortalDataNoticeDismissed', 'true');
+    setShowDataNotice(false);
+  };
 
   const {
     books,
@@ -321,7 +333,9 @@ function App() {
   const dueSoonBooks = getDueSoonBooks();
 
   // Handle login
-  const handleLogin = (email: string, password: string) => {
+  const handleLogin = async (email: string, password: string) => {
+    startLoading('Logging in...');
+    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
     const result = login(email, password);
     if (result.success) {
       // Check role and redirect accordingly
@@ -332,11 +346,14 @@ function App() {
         setCurrentView('dashboard');
       }
     }
+    stopLoading();
     return result;
   };
 
   // Handle register
-  const handleRegister = (name: string, email: string, password: string, role: 'student' | 'teacher' | 'admin', grade?: string) => {
+  const handleRegister = async (name: string, email: string, password: string, role: 'student' | 'teacher' | 'admin', grade?: string) => {
+    startLoading('Creating account...');
+    await new Promise(resolve => setTimeout(resolve, 500));
     const result = register(name, email, password, role, grade);
     if (result.success) {
       if (role === 'admin') {
@@ -345,13 +362,18 @@ function App() {
         setCurrentView('dashboard');
       }
     }
+    stopLoading();
     return result;
   };
 
   // Handle logout
   const handleLogout = () => {
-    logout();
-    setCurrentView('login');
+    startLoading('Logging out...');
+    setTimeout(() => {
+      logout();
+      setCurrentView('login');
+      stopLoading();
+    }, 300);
   };
 
   // Check if user has borrowed a specific book
@@ -362,8 +384,11 @@ function App() {
   // Handle book rent
   const [rentMessage, setRentMessage] = useState<{ show: boolean; message: string; isError: boolean } | null>(null);
 
-  const handleRent = (bookId: string) => {
+  const handleRent = async (bookId: string) => {
+    startLoading('Processing...');
+    await new Promise(resolve => setTimeout(resolve, 300));
     const result = rentBook(bookId);
+    stopLoading();
     if (!result.success && result.message) {
       setRentMessage({ show: true, message: result.message, isError: true });
       setTimeout(() => setRentMessage(null), 4000);
@@ -379,8 +404,11 @@ function App() {
   };
 
   // Handle book return
-  const handleReturn = (bookId: string) => {
+  const handleReturn = async (bookId: string) => {
+    startLoading('Returning book...');
+    await new Promise(resolve => setTimeout(resolve, 300));
     returnBook(bookId);
+    stopLoading();
   };
 
   // Global scroll snap for pinned sections
@@ -994,6 +1022,36 @@ function App() {
 
   return (
     <div className="min-h-screen">
+      {/* Data Persistence Notice */}
+      {showDataNotice && (
+        <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-auto sm:max-w-lg bg-yellow-100 border-[3px] border-yellow-400 rounded-2xl p-4 z-[60] shadow-lg animate-in slide-in-from-bottom duration-300">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-yellow-400 flex items-center justify-center flex-shrink-0">
+              <AlertCircle size={18} className="text-yellow-900" />
+            </div>
+            <div className="flex-1">
+              <h4 className="font-bold text-sm text-yellow-900 mb-1">Data Storage Notice</h4>
+              <p className="text-xs text-yellow-800 mb-2">
+                Your data is stored locally in this browser only. It will NOT sync across devices or browsers. 
+                For permanent storage, a backend database is required.
+              </p>
+              <button
+                onClick={dismissDataNotice}
+                className="text-xs font-bold text-yellow-900 underline hover:no-underline"
+              >
+                Dismiss
+              </button>
+            </div>
+            <button
+              onClick={dismissDataNotice}
+              className="p-1 hover:bg-yellow-200 rounded-full transition-colors"
+            >
+              <X size={16} className="text-yellow-900" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <Navbar
         currentView={currentView}
         setView={setCurrentView}
