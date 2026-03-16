@@ -1,278 +1,306 @@
-import { useState } from 'react';
-import { X, Mail, Send, User, Clock, Check, CheckCheck, MessageSquare } from 'lucide-react';
-import type { Message, User as UserType } from '@/types';
+import { useState, useEffect } from 'react';
+import { X, Send, Inbox, Send as SendIcon, MessageSquare, Loader2 } from 'lucide-react';
+import type { Message, User } from '@/types';
 
 interface MessagesProps {
   isOpen: boolean;
   onClose: () => void;
-  currentUser: UserType;
-  messages: Message[];
-  users: { id: string; name: string; role: string }[];
-  onSendMessage: (recipientId: string, recipientName: string, subject: string, content: string) => void;
-  onMarkAsRead: (messageId: string) => void;
+  currentUser: User;
+  users: User[];
+  getUserMessages: (userId: string) => Promise<Message[]>;
+  getUnreadMessageCount: (userId: string) => Promise<number>;
+  onSendMessage: (recipientId: string, recipientName: string, subject: string, content: string) => Promise<void>;
+  onMarkAsRead: (messageId: string) => Promise<void>;
 }
 
-export function MessagesModal({
-  isOpen,
-  onClose,
+export function Messages({ 
+  isOpen, 
+  onClose, 
   currentUser,
-  messages,
   users,
+  getUserMessages,
+  getUnreadMessageCount,
   onSendMessage,
   onMarkAsRead
 }: MessagesProps) {
   const [activeTab, setActiveTab] = useState<'inbox' | 'sent' | 'compose'>('inbox');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [recipientId, setRecipientId] = useState('');
   const [subject, setSubject] = useState('');
   const [content, setContent] = useState('');
+  const [isSending, setIsSending] = useState(false);
+
+  // Load messages from Firebase
+  useEffect(() => {
+    const loadMessages = async () => {
+      try {
+        const [data, count] = await Promise.all([
+          getUserMessages(currentUser.id),
+          getUnreadMessageCount(currentUser.id)
+        ]);
+        setMessages(data);
+        setUnreadCount(count);
+      } catch (error) {
+        console.error('Error loading messages:', error);
+      }
+    };
+
+    if (isOpen) {
+      loadMessages();
+    }
+  }, [isOpen, currentUser.id, getUserMessages, getUnreadMessageCount]);
 
   if (!isOpen) return null;
 
   const inboxMessages = messages.filter(m => m.recipientId === currentUser.id);
   const sentMessages = messages.filter(m => m.senderId === currentUser.id);
-  const unreadCount = inboxMessages.filter(m => !m.read).length;
 
-  const handleSend = (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (recipientId && subject && content) {
+    if (!recipientId || !subject || !content) return;
+
+    setIsSending(true);
+    try {
       const recipient = users.find(u => u.id === recipientId);
       if (recipient) {
-        onSendMessage(recipientId, recipient.name, subject, content);
+        await onSendMessage(recipientId, recipient.name, subject, content);
+        // Refresh messages
+        const data = await getUserMessages(currentUser.id);
+        setMessages(data);
+        setActiveTab('sent');
         setRecipientId('');
         setSubject('');
         setContent('');
-        setActiveTab('sent');
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleMessageClick = async (message: Message) => {
+    setSelectedMessage(message);
+    if (!message.read && message.recipientId === currentUser.id) {
+      try {
+        await onMarkAsRead(message.id);
+        const [data, count] = await Promise.all([
+          getUserMessages(currentUser.id),
+          getUnreadMessageCount(currentUser.id)
+        ]);
+        setMessages(data);
+        setUnreadCount(count);
+      } catch (error) {
+        console.error('Error marking as read:', error);
       }
     }
   };
 
-  const handleMessageClick = (message: Message) => {
-    setSelectedMessage(message);
-    if (message.recipientId === currentUser.id && !message.read) {
-      onMarkAsRead(message.id);
-    }
-  };
-
-  const formatDate = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="card p-4 sm:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+      <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[var(--accent)] border-[3px] border-[rgba(26,26,26,0.85)] flex items-center justify-center">
-              <Mail size={20} />
-            </div>
-            <div>
-              <h3 className="text-lg sm:text-xl font-bold" style={{ fontFamily: 'var(--font-heading)' }}>
-                Messages
-              </h3>
-              <p className="text-xs text-[var(--text-secondary)]">
-                {unreadCount > 0 ? `${unreadCount} unread message${unreadCount > 1 ? 's' : ''}` : 'No new messages'}
-              </p>
-            </div>
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <div>
+            <h3 className="text-2xl font-bold text-[#1a1a1a]">Messages</h3>
+            <p className="text-gray-500 mt-1">
+              {unreadCount > 0 ? `${unreadCount} unread message${unreadCount > 1 ? 's' : ''}` : 'No new messages'}
+            </p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-100 transition-colors"
+            className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
           >
-            <X size={20} />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => { setActiveTab('inbox'); setSelectedMessage(null); }}
-            className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-xl border-[3px] transition-all ${
-              activeTab === 'inbox'
-                ? 'bg-[var(--accent)] border-[rgba(26,26,26,0.85)]'
-                : 'bg-white border-[rgba(26,26,26,0.2)]'
-            }`}
-          >
-            <Mail size={16} />
-            <span className="text-sm font-bold">Inbox ({inboxMessages.length})</span>
-          </button>
-          <button
-            onClick={() => { setActiveTab('sent'); setSelectedMessage(null); }}
-            className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-xl border-[3px] transition-all ${
-              activeTab === 'sent'
-                ? 'bg-[var(--accent)] border-[rgba(26,26,26,0.85)]'
-                : 'bg-white border-[rgba(26,26,26,0.2)]'
-            }`}
-          >
-            <Send size={16} />
-            <span className="text-sm font-bold">Sent</span>
-          </button>
-          <button
-            onClick={() => { setActiveTab('compose'); setSelectedMessage(null); }}
-            className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-xl border-[3px] transition-all ${
-              activeTab === 'compose'
-                ? 'bg-[var(--accent)] border-[rgba(26,26,26,0.85)]'
-                : 'bg-white border-[rgba(26,26,26,0.2)]'
-            }`}
-          >
-            <MessageSquare size={16} />
-            <span className="text-sm font-bold">Compose</span>
-          </button>
+        <div className="flex border-b border-gray-100">
+          {[
+            { id: 'inbox', label: 'Inbox', icon: Inbox, count: unreadCount },
+            { id: 'sent', label: 'Sent', icon: SendIcon },
+            { id: 'compose', label: 'Compose', icon: MessageSquare }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setActiveTab(tab.id as any);
+                setSelectedMessage(null);
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 font-medium transition-colors ${
+                activeTab === tab.id
+                  ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+              {tab.count > 0 && (
+                <span className="ml-1 px-2 py-0.5 rounded-full bg-red-500 text-white text-xs">
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
 
-        {/* Inbox */}
-        {activeTab === 'inbox' && !selectedMessage && (
-          <div className="space-y-2">
-            {inboxMessages.length === 0 ? (
-              <div className="text-center py-8 bg-[var(--bg-primary)] rounded-xl">
-                <Mail size={32} className="mx-auto mb-2 text-[var(--text-secondary)]" />
-                <p className="text-sm text-[var(--text-secondary)]">No messages in inbox</p>
-              </div>
-            ) : (
-              inboxMessages.slice().reverse().map((message) => (
-                <button
-                  key={message.id}
-                  onClick={() => handleMessageClick(message)}
-                  className={`w-full card p-3 text-left transition-all hover:shadow-md ${
-                    !message.read ? 'bg-[var(--card-mint)] border-[rgba(26,26,26,0.85)]' : ''
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-[var(--accent)] border-[2px] border-[rgba(26,26,26,0.85)] flex items-center justify-center">
-                        <User size={14} />
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm">{message.senderName}</p>
-                        <p className={`text-xs ${!message.read ? 'font-bold' : 'text-[var(--text-secondary)]'}`}>
-                          {message.subject}
-                        </p>
-                      </div>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {/* Inbox */}
+          {activeTab === 'inbox' && !selectedMessage && (
+            <div className="space-y-3">
+              {inboxMessages.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <Inbox className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p>No messages in your inbox</p>
+                </div>
+              ) : (
+                inboxMessages.slice().reverse().map((message) => (
+                  <div
+                    key={message.id}
+                    onClick={() => handleMessageClick(message)}
+                    className={`p-4 rounded-2xl cursor-pointer transition-colors ${
+                      message.read ? 'bg-gray-50' : 'bg-[#c4f692]/30 border border-[#c4f692]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <span className="font-medium text-[#1a1a1a]">{message.senderName}</span>
+                      <span className="text-xs text-gray-500">
+                        {new Date(message.timestamp).toLocaleDateString()}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1 text-[var(--text-secondary)]">
-                      <Clock size={12} />
-                      <span className="text-[10px]">{formatDate(message.timestamp)}</span>
-                    </div>
+                    <h4 className={`mb-1 ${message.read ? 'text-gray-700' : 'font-bold text-[#1a1a1a]'}`}>
+                      {message.subject}
+                    </h4>
+                    <p className="text-sm text-gray-500 line-clamp-2">{message.content}</p>
                   </div>
-                </button>
-              ))
-            )}
-          </div>
-        )}
+                ))
+              )}
+            </div>
+          )}
 
-        {/* Sent */}
-        {activeTab === 'sent' && !selectedMessage && (
-          <div className="space-y-2">
-            {sentMessages.length === 0 ? (
-              <div className="text-center py-8 bg-[var(--bg-primary)] rounded-xl">
-                <Send size={32} className="mx-auto mb-2 text-[var(--text-secondary)]" />
-                <p className="text-sm text-[var(--text-secondary)]">No sent messages</p>
-              </div>
-            ) : (
-              sentMessages.slice().reverse().map((message) => (
-                <button
-                  key={message.id}
-                  onClick={() => handleMessageClick(message)}
-                  className="w-full card p-3 text-left transition-all hover:shadow-md"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-[var(--card-lavender)] border-[2px] border-[rgba(26,26,26,0.85)] flex items-center justify-center">
-                        <User size={14} />
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm">To: {message.recipientName}</p>
-                        <p className="text-xs text-[var(--text-secondary)]">{message.subject}</p>
-                      </div>
+          {/* Sent */}
+          {activeTab === 'sent' && !selectedMessage && (
+            <div className="space-y-3">
+              {sentMessages.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <SendIcon className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p>No sent messages</p>
+                </div>
+              ) : (
+                sentMessages.slice().reverse().map((message) => (
+                  <div
+                    key={message.id}
+                    onClick={() => setSelectedMessage(message)}
+                    className="p-4 rounded-2xl bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <span className="font-medium text-[#1a1a1a]">To: {message.recipientName}</span>
+                      <span className="text-xs text-gray-500">
+                        {new Date(message.timestamp).toLocaleDateString()}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1 text-[var(--text-secondary)]">
-                      <Clock size={12} />
-                      <span className="text-[10px]">{formatDate(message.timestamp)}</span>
-                      {message.read ? <CheckCheck size={12} className="text-blue-500" /> : <Check size={12} />}
-                    </div>
+                    <h4 className="text-gray-700 mb-1">{message.subject}</h4>
+                    <p className="text-sm text-gray-500 line-clamp-2">{message.content}</p>
                   </div>
-                </button>
-              ))
-            )}
-          </div>
-        )}
+                ))
+              )}
+            </div>
+          )}
 
-        {/* Compose */}
-        {activeTab === 'compose' && (
-          <form onSubmit={handleSend} className="space-y-4">
-            <div>
-              <label className="micro-label block mb-1 text-xs">To</label>
-              <select
-                value={recipientId}
-                onChange={(e) => setRecipientId(e.target.value)}
-                className="input-field text-sm"
-                required
-              >
-                <option value="">Select recipient...</option>
-                {users.filter(u => u.id !== currentUser.id).map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.role})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="micro-label block mb-1 text-xs">Subject</label>
-              <input
-                type="text"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className="input-field text-sm"
-                placeholder="Enter subject..."
-                required
-              />
-            </div>
-            <div>
-              <label className="micro-label block mb-1 text-xs">Message</label>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="input-field rounded-2xl py-3 text-sm"
-                rows={5}
-                placeholder="Type your message..."
-                required
-              />
-            </div>
-            <button type="submit" className="w-full btn-primary flex items-center justify-center gap-2">
-              <Send size={16} />
-              Send Message
-            </button>
-          </form>
-        )}
-
-        {/* Message Detail */}
-        {selectedMessage && (
-          <div className="card p-4">
-            <button
-              onClick={() => setSelectedMessage(null)}
-              className="mb-4 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            >
-              ← Back to {activeTab}
-            </button>
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 rounded-full bg-[var(--accent)] border-[2px] border-[rgba(26,26,26,0.85)] flex items-center justify-center">
-                <User size={18} />
-              </div>
+          {/* Compose */}
+          {activeTab === 'compose' && (
+            <form onSubmit={handleSend} className="space-y-4">
               <div>
-                <p className="font-bold">
-                  {activeTab === 'inbox' ? selectedMessage.senderName : `To: ${selectedMessage.recipientName}`}
-                </p>
-                <p className="text-xs text-[var(--text-secondary)]">{formatDate(selectedMessage.timestamp)}</p>
+                <label className="block text-sm font-medium text-gray-700 mb-1">To</label>
+                <select
+                  value={recipientId}
+                  onChange={(e) => setRecipientId(e.target.value)}
+                  className="w-full h-12 rounded-xl border-2 border-[rgba(26,26,26,0.1)] px-4"
+                  required
+                >
+                  <option value="">Select recipient</option>
+                  {users.filter(u => u.id !== currentUser.id).map(u => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                  ))}
+                </select>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                <input
+                  type="text"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  className="w-full h-12 rounded-xl border-2 border-[rgba(26,26,26,0.1)] px-4"
+                  placeholder="Enter subject..."
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                <textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  className="w-full h-40 rounded-xl border-2 border-[rgba(26,26,26,0.1)] px-4 py-3 resize-none"
+                  placeholder="Type your message..."
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSending}
+                className="w-full h-12 rounded-xl bg-[#1a1a1a] text-white font-medium hover:bg-[#2a2a2a] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isSending ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-5 h-5" />
+                    Send Message
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* Message Detail */}
+          {selectedMessage && (
+            <div className="bg-gray-50 rounded-2xl p-6">
+              <button
+                onClick={() => setSelectedMessage(null)}
+                className="mb-4 text-sm text-gray-500 hover:text-[#1a1a1a]"
+              >
+                ← Back to list
+              </button>
+              
+              <div className="mb-4">
+                <div className="text-sm text-gray-500 mb-1">
+                  {selectedMessage.senderId === currentUser.id ? 'To' : 'From'}:{' '}
+                  {selectedMessage.senderId === currentUser.id 
+                    ? selectedMessage.recipientName 
+                    : selectedMessage.senderName}
+                </div>
+                <h3 className="text-xl font-bold text-[#1a1a1a]">{selectedMessage.subject}</h3>
+                <div className="text-sm text-gray-500 mt-1">
+                  {new Date(selectedMessage.timestamp).toLocaleString()}
+                </div>
+              </div>
+              
+              <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
+                {selectedMessage.content}
+              </p>
             </div>
-            <h4 className="font-bold text-lg mb-3">{selectedMessage.subject}</h4>
-            <div className="bg-[var(--bg-primary)] rounded-xl p-4">
-              <p className="text-[var(--text-secondary)] whitespace-pre-wrap">{selectedMessage.content}</p>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
