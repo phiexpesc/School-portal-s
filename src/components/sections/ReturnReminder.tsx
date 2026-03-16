@@ -1,33 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { Clock, DollarSign, AlertCircle } from 'lucide-react';
-import type { BorrowedBook } from '@/types';
+import { Calendar, AlertCircle, ArrowRight } from 'lucide-react';
+import type { View, BorrowedBook, Book } from '@/types';
 
 gsap.registerPlugin(ScrollTrigger);
 
 interface ReturnReminderProps {
-  borrowedBooks: BorrowedBook[];
-  getDueSoonBooks: () => Promise<BorrowedBook[]>;
+  setView: (view: View) => void;
+  borrowedBooks: (BorrowedBook & { book: Book })[];
 }
 
-export function ReturnReminder({ borrowedBooks: initialBorrowedBooks, getDueSoonBooks }: ReturnReminderProps) {
-  const sectionRef = useRef<HTMLElement>(null);
+export function ReturnReminder({ setView, borrowedBooks }: ReturnReminderProps) {
+  const sectionRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [dueSoonCount, setDueSoonCount] = useState(0);
-
-  // Load due soon count from Firebase
-  useEffect(() => {
-    const loadDueSoon = async () => {
-      try {
-        const books = await getDueSoonBooks();
-        setDueSoonCount(books.length);
-      } catch (error) {
-        console.error('Error loading due soon books:', error);
-      }
-    };
-    loadDueSoon();
-  }, [getDueSoonBooks, initialBorrowedBooks]);
 
   useEffect(() => {
     const section = sectionRef.current;
@@ -36,10 +22,10 @@ export function ReturnReminder({ borrowedBooks: initialBorrowedBooks, getDueSoon
 
     const ctx = gsap.context(() => {
       const mm = gsap.matchMedia();
-
+      
       mm.add('(min-width: 1024px)', () => {
         const children = content.querySelectorAll('.desktop-only > div, .desktop-only > button');
-
+        
         const scrollTl = gsap.timeline({
           scrollTrigger: {
             trigger: section,
@@ -50,6 +36,7 @@ export function ReturnReminder({ borrowedBooks: initialBorrowedBooks, getDueSoon
           }
         });
 
+        // ENTRANCE (0% - 30%)
         scrollTl.fromTo(children[0],
           { x: '-60vw', opacity: 0 },
           { x: 0, opacity: 1, ease: 'none' },
@@ -76,6 +63,7 @@ export function ReturnReminder({ borrowedBooks: initialBorrowedBooks, getDueSoon
           0.16
         );
 
+        // EXIT (70% - 100%)
         scrollTl.to(children[1],
           { x: '55vw', opacity: 0, ease: 'power2.in' },
           0.7
@@ -96,80 +84,130 @@ export function ReturnReminder({ borrowedBooks: initialBorrowedBooks, getDueSoon
     return () => ctx.revert();
   }, []);
 
+  const dueSoonCount = borrowedBooks.filter(bb => {
+    const dueDate = new Date(bb.dueDate);
+    const today = new Date();
+    const diffTime = dueDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays <= 3 && diffDays >= 0;
+  }).length;
+
   return (
-    <section ref={sectionRef} className="relative min-h-screen bg-[#f8f7f4] overflow-hidden">
-      <div ref={contentRef} className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
-        {/* Mobile/Tablet Layout */}
-        <div className="lg:hidden space-y-6">
-          <div className="aspect-[4/3] rounded-3xl overflow-hidden">
+    <section ref={sectionRef} className="min-h-screen lg:h-screen bg-[var(--bg-secondary)] flex items-center justify-center py-16 lg:py-0">
+      {/* Dot Grid Overlay */}
+      <div className="absolute inset-0 dot-grid pointer-events-none mix-blend-overlay" />
+
+      <div ref={contentRef} className="relative w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Mobile/Tablet Layout - Stacked */}
+        <div className="lg:hidden space-y-4">
+          {/* Photo Card */}
+          <div className="card p-0 overflow-hidden">
             <img
-              src="https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=800&h=600&fit=crop"
-              alt="Library"
-              className="w-full h-full object-cover"
+              src="https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=800&h=600&fit=crop"
+              alt="Book stack"
+              className="w-full h-48 sm:h-64 object-cover"
             />
           </div>
-          
-          <div className="bg-white rounded-3xl p-8 border-2 border-[rgba(26,26,26,0.1)]">
-            <h2 className="text-3xl font-bold text-[#1a1a1a] mb-4">Don't forget to return!</h2>
-            <p className="text-gray-600 mb-4">
+
+          {/* Text Card */}
+          <div className="card p-5 sm:p-6">
+            <h2 className="text-2xl sm:text-3xl font-black mb-3" style={{ fontFamily: 'var(--font-heading)' }}>
+              Don't forget to return!
+            </h2>
+            <p className="text-[var(--text-secondary)] text-sm sm:text-base mb-5 leading-relaxed">
               Keep your library record clear—return books by their due date to avoid late fees.
+              {dueSoonCount > 0 && (
+                <span className="block mt-2 font-bold text-red-600">
+                  You have {dueSoonCount} book{dueSoonCount > 1 ? 's' : ''} due soon!
+                </span>
+              )}
             </p>
-            {dueSoonCount > 0 && (
-              <div className="flex items-center gap-2 text-amber-600 font-medium">
-                <AlertCircle className="w-5 h-5" />
-                You have {dueSoonCount} book{dueSoonCount > 1 ? 's' : ''} due soon!
-              </div>
-            )}
+            <button
+              onClick={() => setView('mybooks')}
+              className="btn-primary flex items-center gap-2 text-sm"
+            >
+              <Calendar size={18} />
+              View due dates
+              <ArrowRight size={16} />
+            </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-[#c4f692] rounded-2xl p-6">
-              <Clock className="w-8 h-8 text-[#1a1a1a] mb-3" />
-              <div className="text-3xl font-bold text-[#1a1a1a]">{dueSoonCount}</div>
-              <div className="text-sm text-[#1a1a1a]/70">books due soon</div>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Due Soon Card */}
+            <div className="card p-4 bg-[var(--card-mint)] flex flex-col justify-center">
+              <div className="w-8 h-8 rounded-full bg-white border-[2px] border-[rgba(26,26,26,0.85)] flex items-center justify-center mb-2">
+                <Calendar size={14} />
+              </div>
+              <span className="micro-label text-[var(--text-secondary)] text-xs">Due Soon</span>
+              <p className="font-bold text-xl mt-1">{dueSoonCount}</p>
+              <p className="text-xs text-[var(--text-secondary)]">books</p>
             </div>
-            
-            <div className="bg-[#d4c5f9] rounded-2xl p-6">
-              <DollarSign className="w-8 h-8 text-[#1a1a1a] mb-3" />
-              <div className="text-3xl font-bold text-[#1a1a1a]">$0.50</div>
-              <div className="text-sm text-[#1a1a1a]/70">per day late fee</div>
+
+            {/* Late Fee Card */}
+            <div className="card p-4 bg-[var(--card-lavender)] flex flex-col justify-center">
+              <div className="w-8 h-8 rounded-full bg-white border-[2px] border-[rgba(26,26,26,0.85)] flex items-center justify-center mb-2">
+                <AlertCircle size={14} />
+              </div>
+              <span className="micro-label text-[var(--text-secondary)] text-xs">Late fee</span>
+              <p className="font-bold text-lg mt-1">$0.50/day</p>
+              <p className="text-xs text-[var(--text-secondary)]">per book</p>
             </div>
           </div>
         </div>
 
-        {/* Desktop Layout */}
+        {/* Desktop Layout - Absolute Positioned */}
         <div className="hidden lg:block desktop-only relative h-[80vh]">
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[400px] aspect-[3/4] rounded-3xl overflow-hidden shadow-2xl">
+          {/* Photo Card (Left) */}
+          <div className="absolute left-0 top-[10%] w-[45%] h-[75%] rounded-[34px] border-[3px] border-[rgba(26,26,26,0.85)] overflow-hidden shadow-[0_18px_40px_rgba(0,0,0,0.10)]">
             <img
-              src="https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=600&h=800&fit=crop"
-              alt="Library"
+              src="https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=800&h=1000&fit=crop"
+              alt="Book stack"
               className="w-full h-full object-cover"
             />
           </div>
 
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-[500px] bg-white rounded-3xl p-10 shadow-xl border-2 border-[rgba(26,26,26,0.1)]">
-            <h2 className="text-4xl font-bold text-[#1a1a1a] mb-6">Don't forget to return!</h2>
-            <p className="text-lg text-gray-600 mb-6">
+          {/* Text Card (Right) */}
+          <div className="absolute right-0 top-[15%] w-[50%] h-[60%] rounded-[34px] border-[3px] border-[rgba(26,26,26,0.85)] bg-white shadow-[0_18px_40px_rgba(0,0,0,0.10)] p-10 flex flex-col justify-center">
+            <h2 className="text-4xl xl:text-5xl font-black mb-4" style={{ fontFamily: 'var(--font-heading)' }}>
+              Don't forget to return!
+            </h2>
+            <p className="text-[var(--text-secondary)] text-lg mb-8 leading-relaxed">
               Keep your library record clear—return books by their due date to avoid late fees.
+              {dueSoonCount > 0 && (
+                <span className="block mt-2 font-bold text-red-600">
+                  You have {dueSoonCount} book{dueSoonCount > 1 ? 's' : ''} due soon!
+                </span>
+              )}
             </p>
-            {dueSoonCount > 0 && (
-              <div className="flex items-center gap-2 text-amber-600 font-medium mb-6">
-                <AlertCircle className="w-5 h-5" />
-                You have {dueSoonCount} book{dueSoonCount > 1 ? 's' : ''} due soon!
-              </div>
-            )}
+            <button
+              onClick={() => setView('mybooks')}
+              className="btn-primary self-start flex items-center gap-2"
+            >
+              <Calendar size={20} />
+              View due dates
+              <ArrowRight size={18} />
+            </button>
           </div>
 
-          <div className="absolute right-[100px] top-[10%] w-[200px] bg-[#c4f692] rounded-2xl p-6 shadow-lg">
-            <Clock className="w-8 h-8 text-[#1a1a1a] mb-3" />
-            <div className="text-4xl font-bold text-[#1a1a1a]">{dueSoonCount}</div>
-            <div className="text-sm text-[#1a1a1a]/70">books due soon</div>
+          {/* Mint Card */}
+          <div className="absolute left-[38%] top-[5%] w-[18%] h-[20%] rounded-[28px] border-[3px] border-[rgba(26,26,26,0.85)] bg-[var(--card-mint)] shadow-[0_18px_40px_rgba(0,0,0,0.10)] p-5 flex flex-col justify-center">
+            <div className="w-10 h-10 rounded-full bg-white border-[2px] border-[rgba(26,26,26,0.85)] flex items-center justify-center mb-3">
+              <Calendar size={18} />
+            </div>
+            <span className="micro-label text-[var(--text-secondary)]">Due Soon</span>
+            <p className="font-bold text-2xl mt-1">{dueSoonCount}</p>
+            <p className="text-xs text-[var(--text-secondary)]">books</p>
           </div>
 
-          <div className="absolute right-[50px] bottom-[10%] w-[200px] bg-[#d4c5f9] rounded-2xl p-6 shadow-lg">
-            <DollarSign className="w-8 h-8 text-[#1a1a1a] mb-3" />
-            <div className="text-4xl font-bold text-[#1a1a1a]">$0.50</div>
-            <div className="text-sm text-[#1a1a1a]/70">per day late fee</div>
+          {/* Lavender Card */}
+          <div className="absolute right-[5%] bottom-[5%] w-[16%] h-[20%] rounded-[28px] border-[3px] border-[rgba(26,26,26,0.85)] bg-[var(--card-lavender)] shadow-[0_18px_40px_rgba(0,0,0,0.10)] p-5 flex flex-col justify-center">
+            <div className="w-10 h-10 rounded-full bg-white border-[2px] border-[rgba(26,26,26,0.85)] flex items-center justify-center mb-3">
+              <AlertCircle size={18} />
+            </div>
+            <span className="micro-label text-[var(--text-secondary)]">Late fee</span>
+            <p className="font-bold text-xl mt-1">$0.50/day</p>
+            <p className="text-xs text-[var(--text-secondary)]">per book</p>
           </div>
         </div>
       </div>
