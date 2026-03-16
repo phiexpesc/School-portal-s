@@ -31,7 +31,6 @@ interface NavbarProps {
 
 export function Navbar({ currentView, setView, isLoggedIn, isAdmin, userRole = 'student', onLogout, userName, unreadMessages = 0 }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [studentMenuOpen, setStudentMenuOpen] = useState(false);
 
   const navItems: { view: View; label: string; icon: React.ReactNode; shortLabel: string }[] = [
     { view: 'dashboard', label: 'Dashboard', shortLabel: 'Home', icon: <Home size={20} /> },
@@ -80,6 +79,7 @@ export function Navbar({ currentView, setView, isLoggedIn, isAdmin, userRole = '
 
           {/* Desktop Navigation */}
           <div className="hidden lg:flex items-center gap-1">
+            {/* Main Nav Items */}
             {isLoggedIn && navItems.map((item) => (
               <button
                 key={item.view}
@@ -102,52 +102,105 @@ export function Navbar({ currentView, setView, isLoggedIn, isAdmin, userRole = '
               </button>
             )}
 
-            {/* Student/Teacher Menu - Desktop */}
-            {isLoggedIn && !isAdmin && (
-              <div className="relative">
+            {/* Student Menu Items - Direct Links */}
+            {isLoggedIn && !isAdmin && userRole === 'student' && (
+              <>
+                <div className="w-px h-6 bg-[rgba(26,26,26,0.2)] mx-1" />
                 <button
-                  onClick={() => setStudentMenuOpen(!studentMenuOpen)}
-                  className={`nav-link flex items-center gap-2 ${
-                    (userRole === 'teacher' ? teacherMenuItems : studentMenuItems).some(i => i.view === currentView) ? 'bg-[var(--accent)]' : ''
-                  }`}
+                  onClick={() => handleNavClick('grades')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'grades' ? 'bg-[var(--accent)]' : ''}`}
                 >
-                  <User size={18} />
-                  <span>{userRole === 'teacher' ? 'Teacher Menu' : 'My Account'}</span>
+                  <TrendingUp size={18} />
+                  <span>Grades</span>
+                </button>
+                <button
+                  onClick={() => handleNavClick('messages')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'messages' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <Mail size={18} />
+                  <span>Messages</span>
                   {unreadMessages > 0 && (
                     <span className="w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
                       {unreadMessages}
                     </span>
                   )}
                 </button>
-                
-                {studentMenuOpen && (
-                  <div className="absolute top-full right-0 mt-2 w-56 bg-white rounded-2xl border-[3px] border-[rgba(26,26,26,0.85)] shadow-lg py-2 z-50 max-h-[70vh] overflow-y-auto">
-                    <p className="px-4 py-2 text-[10px] text-[var(--text-secondary)] uppercase tracking-wide">
-                      {userRole === 'teacher' ? 'Teacher Options' : 'My Account'}
-                    </p>
-                    {(userRole === 'teacher' ? teacherMenuItems : studentMenuItems).map((item) => (
-                      <button
-                        key={item.view}
-                        onClick={() => {
-                          handleNavClick(item.view);
-                          setStudentMenuOpen(false);
-                        }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-[var(--bg-primary)] transition-colors ${
-                          currentView === item.view ? 'bg-[var(--bg-primary)]' : ''
-                        }`}
-                      >
-                        {item.icon}
-                        <span className="text-sm font-bold">{item.label}</span>
-                        {item.view === 'messages' && unreadMessages > 0 && (
-                          <span className="ml-auto w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
-                            {unreadMessages}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                <button
+                  onClick={() => handleNavClick('enrollment')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'enrollment' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <GraduationCap size={18} />
+                  <span>Enrollment</span>
+                </button>
+                <button
+                  onClick={() => handleNavClick('attendance')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'attendance' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <Clock size={18} />
+                  <span>Attendance</span>
+                </button>
+                <button
+                  onClick={() => handleNavClick('tickets')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'tickets' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <Ticket size={18} />
+                  <span>Tickets</span>
+                </button>
+                <button
+                  onClick={() => handleNavClick('profile')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'profile' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <Settings size={18} />
+                  <span>Profile</span>
+                </button>
+              </>
+            )}
+
+            {/* Teacher Menu Items - Direct Links */}
+            {isLoggedIn && !isAdmin && userRole === 'teacher' && (
+              <>
+                <div className="w-px h-6 bg-[rgba(26,26,26,0.2)] mx-1" />
+                <button
+                  onClick={() => handleNavClick('sections')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'sections' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <Users size={18} />
+                  <span>Sections</span>
+                </button>
+                <button
+                  onClick={() => handleNavClick('grades')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'grades' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <TrendingUp size={18} />
+                  <span>Grades</span>
+                </button>
+                <button
+                  onClick={() => handleNavClick('attendance')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'attendance' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <Clock size={18} />
+                  <span>Attendance</span>
+                </button>
+                <button
+                  onClick={() => handleNavClick('messages')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'messages' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <Mail size={18} />
+                  <span>Messages</span>
+                  {unreadMessages > 0 && (
+                    <span className="w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                      {unreadMessages}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => handleNavClick('profile')}
+                  className={`nav-link flex items-center gap-2 ${currentView === 'profile' ? 'bg-[var(--accent)]' : ''}`}
+                >
+                  <Settings size={18} />
+                  <span>Profile</span>
+                </button>
+              </>
             )}
             
             {isLoggedIn ? (
