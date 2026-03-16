@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { BookOpen, Lock, Mail, Eye, EyeOff, UserPlus, User, GraduationCap, Shield, Clock } from 'lucide-react';
 
 interface LoginProps {
-  onLogin: (email: string, password: string) => { success: boolean; role?: 'student' | 'teacher' | 'admin'; error?: string; pending?: boolean };
-  onRegister: (name: string, email: string, password: string, role: 'student' | 'teacher' | 'admin', grade?: string) => { success: boolean; error: string | null; pending?: boolean };
+  onLogin: (email: string, password: string) => Promise<{ success: boolean; role?: 'student' | 'teacher' | 'admin'; error?: string; pending?: boolean }>;
+  onRegister: (name: string, email: string, password: string, role: 'student' | 'teacher' | 'admin', grade?: string) => Promise<{ success: boolean; error: string | null; pending?: boolean }>;
 }
 
 export function Login({ onLogin, onRegister }: LoginProps) {
@@ -24,9 +24,7 @@ export function Login({ onLogin, onRegister }: LoginProps) {
     setPendingMessage('');
     setIsLoading(true);
     
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const result = onLogin(email, password);
+    const result = await onLogin(email, password);
     if (!result.success) {
       if (result.pending) {
         setPendingMessage(result.error || 'Your account is pending approval.');
@@ -43,9 +41,7 @@ export function Login({ onLogin, onRegister }: LoginProps) {
     setPendingMessage('');
     setIsLoading(true);
     
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const result = onRegister(name, email, password, role, grade);
+    const result = await onRegister(name, email, password, role, grade);
     if (!result.success) {
       setError(result.error || 'Registration failed');
     } else if (result.pending) {
