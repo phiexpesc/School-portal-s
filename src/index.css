@@ -1,0 +1,366 @@
+/* Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Color System */
+  --bg-primary: #B7E0FF;
+  --bg-secondary: #F8B4D9;
+  --accent: #FFD15C;
+  --text-primary: #1A1A1A;
+  --text-secondary: #2F2F2F;
+  
+  /* Card Surface Colors */
+  --card-mint: #E6F6EE;
+  --card-peach: #FFE8D6;
+  --card-lavender: #E9E8FF;
+  --card-yellow: #FFF9C4;
+  
+  /* Font Families */
+  --font-heading: 'Nunito', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+  
+  /* Radius */
+  --radius-lg: 28px;
+  --radius-xl: 36px;
+  
+  /* Shadows */
+  --shadow-card: 0 18px 40px rgba(0, 0, 0, 0.10);
+  --shadow-border: 0 0 0 3px rgba(26, 26, 26, 0.85);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  overflow-x: hidden;
+  line-height: 1.6;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+h1 {
+  font-size: clamp(2.75rem, 5vw, 4.5rem);
+}
+
+h2 {
+  font-size: clamp(2.125rem, 3.6vw, 3.25rem);
+}
+
+h3 {
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+}
+
+/* Micro Labels */
+.micro-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 400;
+}
+
+/* Dot Grid Pattern */
+.dot-grid {
+  background-image: radial-gradient(circle, rgba(26, 26, 26, 0.15) 1.5px, transparent 1.5px);
+  background-size: 24px 24px;
+  opacity: 0.6;
+}
+
+/* Card Styles */
+.card {
+  border-radius: var(--radius-xl);
+  border: 3px solid rgba(26, 26, 26, 0.85);
+  box-shadow: var(--shadow-card);
+  background: white;
+}
+
+.card-mint {
+  background: var(--card-mint);
+}
+
+.card-peach {
+  background: var(--card-peach);
+}
+
+.card-lavender {
+  background: var(--card-lavender);
+}
+
+.card-yellow {
+  background: var(--card-yellow);
+}
+
+/* Button Styles */
+.btn-primary {
+  background: var(--accent);
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-weight: 800;
+  padding: 14px 32px;
+  border-radius: 50px;
+  border: 3px solid rgba(26, 26, 26, 0.85);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  font-size: 16px;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: white;
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  padding: 12px 24px;
+  border-radius: 50px;
+  border: 3px solid rgba(26, 26, 26, 0.85);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-primary);
+}
+
+/* Input Styles */
+.input-field {
+  width: 100%;
+  padding: 16px 24px;
+  border-radius: 50px;
+  border: 3px solid rgba(26, 26, 26, 0.85);
+  font-family: var(--font-body);
+  font-size: 16px;
+  background: white;
+  transition: box-shadow 0.2s ease;
+}
+
+.input-field:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(255, 209, 92, 0.3);
+}
+
+.input-field::placeholder {
+  color: rgba(26, 26, 26, 0.5);
+}
+
+/* Chip Styles */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 20px;
+  border-radius: 50px;
+  border: 3px solid rgba(26, 26, 26, 0.85);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: white;
+}
+
+.chip:hover {
+  background: var(--accent);
+}
+
+.chip.active {
+  background: var(--accent);
+}
+
+/* Navigation */
+.nav-link {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text-primary);
+  text-decoration: none;
+  padding: 8px 16px;
+  border-radius: 50px;
+  transition: all 0.2s ease;
+}
+
+.nav-link:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Section Styles */
+.section-pinned {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.section-flowing {
+  width: 100%;
+  position: relative;
+  padding: 8vh 0;
+}
+
+/* Book Card */
+.book-card {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  border: 3px solid rgba(26, 26, 26, 0.85);
+  background: white;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+
+.book-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+}
+
+.book-cover {
+  width: 80px;
+  height: 120px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 2px solid rgba(26, 26, 26, 0.85);
+}
+
+/* Event Card */
+.event-card {
+  display: flex;
+  gap: 24px;
+  padding: 24px;
+  border-radius: var(--radius-xl);
+  border: 3px solid rgba(26, 26, 26, 0.85);
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.event-card:hover {
+  transform: translateX(8px);
+}
+
+.event-image {
+  width: 160px;
+  height: 100px;
+  border-radius: 16px;
+  object-fit: cover;
+  border: 2px solid rgba(26, 26, 26, 0.85);
+  flex-shrink: 0;
+}
+
+/* Testimonial Card */
+.testimonial-card {
+  padding: 32px;
+  border-radius: var(--radius-xl);
+  border: 3px solid rgba(26, 26, 26, 0.85);
+  background: white;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(26, 26, 26, 0.3);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(26, 26, 26, 0.5);
+}
+
+/* Animations */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-pulse-slow {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .section-pinned {
+    min-height: 100vh;
+    height: auto;
+    padding: 80px 20px;
+  }
+  
+  .event-card {
+    flex-direction: column;
+  }
+  
+  .event-image {
+    width: 100%;
+    height: 150px;
+  }
+  
+  .book-card {
+    flex-direction: column;
+  }
+  
+  .book-cover {
+    width: 100%;
+    height: 180px;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
