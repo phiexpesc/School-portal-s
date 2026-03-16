@@ -1,39 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Book, User, BorrowedBook, Event, Testimonial, LibraryStats, BookFormData, Announcement, Enrollment, Grade, Message, Ticket, ProfileSettings, Section, AttendanceSession, AttendanceRecord } from '@/types';
 import QRCodeLib from 'qrcode';
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  onSnapshot,
-  Timestamp,
-  writeBatch,
-  increment
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 
-// Collection names
-const COLLECTIONS = {
-  USERS: 'users',
-  BOOKS: 'books',
-  EVENTS: 'events',
-  ANNOUNCEMENTS: 'announcements',
-  ENROLLMENTS: 'enrollments',
-  GRADES: 'grades',
-  MESSAGES: 'messages',
-  TICKETS: 'tickets',
-  SETTINGS: 'settings',
-  SECTIONS: 'sections',
-  ATTENDANCE_SESSIONS: 'attendanceSessions',
-  ATTENDANCE_RECORDS: 'attendanceRecords',
-  BORROWED_BOOKS: 'borrowedBooks'
-} as const;
+// User with password for database storage
+interface UserWithPassword extends User {
+  password: string;
+}
+
+// LocalStorage keys
+const USER_DB_KEY = 'schoolPortalUserDB';
+const ANNOUNCEMENTS_KEY = 'schoolPortalAnnouncements';
+const BOOKS_KEY = 'schoolPortalBooks';
+const EVENTS_KEY = 'schoolPortalEvents';
+const ENROLLMENTS_KEY = 'schoolPortalEnrollments';
+const GRADES_KEY = 'schoolPortalGrades';
+const MESSAGES_KEY = 'schoolPortalMessages';
+const TICKETS_KEY = 'schoolPortalTickets';
+const PROFILE_SETTINGS_KEY = 'schoolPortalProfileSettings';
+const SECTIONS_KEY = 'schoolPortalSections';
+const ATTENDANCE_SESSIONS_KEY = 'schoolPortalAttendanceSessions';
+const ATTENDANCE_RECORDS_KEY = 'schoolPortalAttendanceRecords';
 
 // Initial sample books data
 const initialBooks: Book[] = [
@@ -202,367 +188,287 @@ const defaultProfileSettings: ProfileSettings = {
 };
 
 export function useStore() {
-  const [books, setBooks] = useState<Book[]>([]);
+  const [books, setBooks] = useState<Book[]>(initialBooks);
   const [user, setUser] = useState<User | null>(null);
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<Event[]>(initialEvents);
   const [testimonials] = useState<Testimonial[]>(initialTestimonials);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState<string>('All');
-  const [loading, setLoading] = useState(true);
 
-  // Initialize data from Firebase
+  // Load from localStorage on mount
   useEffect(() => {
-    const initializeData = async () => {
-      try {
-        // Check if books collection is empty, if so, seed it
-        const booksSnapshot = await getDocs(collection(db, COLLECTIONS.BOOKS));
-        if (booksSnapshot.empty) {
-          const batch = writeBatch(db);
-          initialBooks.forEach((book) => {
-            const ref = doc(db, COLLECTIONS.BOOKS, book.id);
-            batch.set(ref, book);
-          });
-          await batch.commit();
-        }
+    const savedUser = localStorage.getItem('schoolPortalUser');
+    const savedBooks = localStorage.getItem(BOOKS_KEY);
+    const savedEvents = localStorage.getItem(EVENTS_KEY);
+    const savedLoginState = localStorage.getItem('schoolPortalLoggedIn');
+    
+    // Load books from localStorage or use initial data
+    if (savedBooks) {
+      setBooks(JSON.parse(savedBooks));
+    } else {
+      // First time - save initial books to localStorage
+      localStorage.setItem(BOOKS_KEY, JSON.stringify(initialBooks));
+    }
 
-        // Check if events collection is empty
-        const eventsSnapshot = await getDocs(collection(db, COLLECTIONS.EVENTS));
-        if (eventsSnapshot.empty) {
-          const batch = writeBatch(db);
-          initialEvents.forEach((event) => {
-            const ref = doc(db, COLLECTIONS.EVENTS, event.id);
-            batch.set(ref, event);
-          });
-          await batch.commit();
-        }
+    // Load events from localStorage or use initial data
+    if (savedEvents) {
+      setEvents(JSON.parse(savedEvents));
+    } else {
+      // First time - save initial events to localStorage
+      localStorage.setItem(EVENTS_KEY, JSON.stringify(initialEvents));
+    }
 
-        // Check if settings exist
-        const settingsDoc = await getDoc(doc(db, COLLECTIONS.SETTINGS, 'profile'));
-        if (!settingsDoc.exists()) {
-          await setDoc(doc(db, COLLECTIONS.SETTINGS, 'profile'), defaultProfileSettings);
-        }
-
-        setLoading(false);
-      } catch (error) {
-        console.error('Error initializing data:', error);
-        setLoading(false);
+    if (savedUser) {
+      const parsedUser = JSON.parse(savedUser) as User;
+      // Sync with user database to get latest borrowed books
+      const db = getUserDB();
+      const dbUser = db.find(u => u.id === parsedUser.id);
+      if (dbUser) {
+        // Use borrowed books from database (most up-to-date)
+        setUser({ ...parsedUser, borrowedBooks: dbUser.borrowedBooks });
+      } else {
+        setUser(parsedUser);
       }
-    };
+    }
 
-    initializeData();
-  }, []);
-
-  // Real-time listeners
-  useEffect(() => {
-    if (loading) return;
-
-    // Listen to books
-    const unsubscribeBooks = onSnapshot(
-      collection(db, COLLECTIONS.BOOKS),
-      (snapshot) => {
-        const booksData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Book[];
-        setBooks(booksData);
-      }
-    );
-
-    // Listen to events
-    const unsubscribeEvents = onSnapshot(
-      collection(db, COLLECTIONS.EVENTS),
-      (snapshot) => {
-        const eventsData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Event[];
-        setEvents(eventsData);
-      }
-    );
-
-    return () => {
-      unsubscribeBooks();
-      unsubscribeEvents();
-    };
-  }, [loading]);
-
-  // Check for saved session on mount
-  useEffect(() => {
-    const savedUserId = localStorage.getItem('schoolPortalUserId');
-    if (savedUserId) {
-      const loadUser = async () => {
-        const userDoc = await getDoc(doc(db, COLLECTIONS.USERS, savedUserId));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as User;
-          setUser(userData);
-          setIsLoggedIn(true);
-        }
-      };
-      loadUser();
+    if (savedLoginState === 'true') {
+      setIsLoggedIn(true);
     }
   }, []);
 
-  // Save user session
+  // Save user to localStorage whenever it changes
   useEffect(() => {
     if (user) {
-      localStorage.setItem('schoolPortalUserId', user.id);
-    } else {
-      localStorage.removeItem('schoolPortalUserId');
+      localStorage.setItem('schoolPortalUser', JSON.stringify(user));
     }
   }, [user]);
 
+  // Save user login state
+  useEffect(() => {
+    localStorage.setItem('schoolPortalLoggedIn', String(isLoggedIn));
+  }, [isLoggedIn]);
+
+  // Get user database from localStorage
+  const getUserDB = (): UserWithPassword[] => {
+    const db = localStorage.getItem(USER_DB_KEY);
+    return db ? JSON.parse(db) : [];
+  };
+
   // Login/Logout
-  const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; role?: 'student' | 'teacher' | 'admin'; error?: string; pending?: boolean }> => {
-    try {
-      // Admin login with hardcoded credentials
-      if (email === 'admin@schoolportal.edu' && password === 'admin') {
-        setIsLoggedIn(true);
-        setUser(adminUser);
-        await setDoc(doc(db, COLLECTIONS.USERS, adminUser.id), adminUser);
-        return { success: true, role: 'admin' };
-      }
-
-      // Query user by email
-      const usersQuery = query(collection(db, COLLECTIONS.USERS), where('email', '==', email));
-      const snapshot = await getDocs(usersQuery);
-      
-      if (snapshot.empty) {
-        return { success: false, error: 'Account not found. Please register first.' };
-      }
-
-      const userDoc = snapshot.docs[0];
-      const userData = userDoc.data() as User & { password: string };
-
-      if (userData.password !== password) {
-        return { success: false, error: 'Incorrect password. Please try again.' };
-      }
-
-      if (userData.verificationPending) {
-        return { success: false, error: 'Your account is pending admin approval. Please wait for verification.', pending: true };
-      }
-
-      if (!userData.verified) {
-        return { success: false, error: 'Your account has not been approved. Please contact admin.' };
-      }
-
-      const { password: _, ...userWithoutPassword } = userData;
+  const login = useCallback((email: string, password: string): { success: boolean; role?: 'student' | 'teacher' | 'admin'; error?: string; pending?: boolean } => {
+    // Admin login with hardcoded credentials
+    if (email === 'admin@schoolportal.edu' && password === 'admin') {
       setIsLoggedIn(true);
-      setUser(userWithoutPassword);
-      return { success: true, role: userData.role };
-    } catch (error) {
-      console.error('Login error:', error);
-      return { success: false, error: 'An error occurred during login.' };
+      setUser(adminUser);
+      return { success: true, role: 'admin' };
     }
+    
+    // Check user database
+    const db = getUserDB();
+    const foundUser = db.find(u => u.email === email);
+    
+    if (!foundUser) {
+      return { success: false, error: 'Account not found. Please register first.' };
+    }
+    
+    if (foundUser.password !== password) {
+      return { success: false, error: 'Incorrect password. Please try again.' };
+    }
+
+    // Check verification status
+    if (foundUser.verificationPending) {
+      return { success: false, error: 'Your account is pending admin approval. Please wait for verification.', pending: true };
+    }
+
+    if (!foundUser.verified) {
+      return { success: false, error: 'Your account has not been approved. Please contact admin.' };
+    }
+    
+    // Login successful
+    const { password: _, ...userWithoutPassword } = foundUser;
+    setIsLoggedIn(true);
+    setUser(userWithoutPassword);
+    return { success: true, role: foundUser.role };
   }, []);
 
   const logout = useCallback(() => {
     setIsLoggedIn(false);
     setUser(null);
-    localStorage.removeItem('schoolPortalUserId');
   }, []);
 
   // Register new user
-  const register = useCallback(async (name: string, email: string, password: string, role: 'student' | 'teacher' | 'admin', grade?: string) => {
-    try {
-      // Check if email already exists
-      const usersQuery = query(collection(db, COLLECTIONS.USERS), where('email', '==', email));
-      const snapshot = await getDocs(usersQuery);
-      
-      if (!snapshot.empty) {
-        return { success: false, error: 'Email already registered. Please login instead.' };
-      }
-
-      if (email === 'admin@schoolportal.edu') {
-        return { success: false, error: 'This email is reserved. Please use a different email.' };
-      }
-
-      const isStudent = role === 'student';
-      const newUser = {
-        id: Date.now().toString(),
-        name,
-        email,
-        password,
-        role,
-        grade: isStudent ? grade || '7th' : undefined,
-        borrowedBooks: [],
-        verified: isStudent,
-        verificationPending: !isStudent,
-        createdAt: Timestamp.now()
-      };
-
-      await setDoc(doc(db, COLLECTIONS.USERS, newUser.id), newUser);
-
-      if (isStudent) {
-        const { password: _, ...userWithoutPassword } = newUser;
-        setUser(userWithoutPassword as User);
-        setIsLoggedIn(true);
-        return { success: true, error: null, autoVerified: true };
-      } else {
-        return { success: true, error: null, pending: true };
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
-      return { success: false, error: 'An error occurred during registration.' };
+  const register = useCallback((name: string, email: string, password: string, role: 'student' | 'teacher' | 'admin', grade?: string) => {
+    // Check if email already exists in database
+    const db = getUserDB();
+    if (db.some(u => u.email === email)) {
+      return { success: false, error: 'Email already registered. Please login instead.' };
+    }
+    
+    // Check reserved emails
+    if (email === 'admin@schoolportal.edu') {
+      return { success: false, error: 'This email is reserved. Please use a different email.' };
+    }
+    
+    // Determine verification status
+    // Students are auto-verified, teachers need approval
+    const isStudent = role === 'student';
+    
+    // Create new user with password
+    const newUser: UserWithPassword = {
+      id: Date.now().toString(),
+      name,
+      email,
+      password,
+      role,
+      grade: isStudent ? grade || '7th' : undefined,
+      borrowedBooks: [],
+      verified: isStudent,
+      verificationPending: !isStudent
+    };
+    
+    // Save to database
+    db.push(newUser);
+    localStorage.setItem(USER_DB_KEY, JSON.stringify(db));
+    
+    // For students, auto-login. For teachers, show pending message
+    if (isStudent) {
+      const { password: _, ...userWithoutPassword } = newUser;
+      setUser(userWithoutPassword);
+      setIsLoggedIn(true);
+      return { success: true, error: null, autoVerified: true };
+    } else {
+      return { success: true, error: null, pending: true };
     }
   }, []);
 
   // Update user profile
-  const updateUserProfile = useCallback(async (updates: Partial<User>) => {
+  const updateUserProfile = useCallback((updates: Partial<User>) => {
     if (!user) return;
     
-    try {
-      const userRef = doc(db, COLLECTIONS.USERS, user.id);
-      await updateDoc(userRef, updates);
-      setUser(prev => prev ? { ...prev, ...updates } : null);
-    } catch (error) {
-      console.error('Error updating profile:', error);
+    const db = getUserDB();
+    const userIndex = db.findIndex(u => u.id === user.id);
+    if (userIndex >= 0) {
+      db[userIndex] = { ...db[userIndex], ...updates };
+      localStorage.setItem(USER_DB_KEY, JSON.stringify(db));
+      
+      const { password: _, ...userWithoutPassword } = db[userIndex];
+      setUser(userWithoutPassword);
     }
   }, [user]);
 
   // Book operations
   const MAX_BOOKS_PER_STUDENT = 5;
 
-  const rentBook = useCallback(async (bookId: string): Promise<{ success: boolean; message?: string }> => {
-    if (!user) return { success: false, message: 'Please login first.' };
+  const rentBook = useCallback((bookId: string): { success: boolean; message?: string } => {
+    // Check if user has reached the book limit
+    const currentBorrowedCount = user?.borrowedBooks.filter(bb => !bb.returned).length || 0;
+    if (currentBorrowedCount >= MAX_BOOKS_PER_STUDENT) {
+      return { 
+        success: false, 
+        message: `You can only borrow up to ${MAX_BOOKS_PER_STUDENT} books at a time. Please return some books first.` 
+      };
+    }
 
-    try {
-      // Check current borrowed count
-      const borrowedQuery = query(
-        collection(db, COLLECTIONS.BORROWED_BOOKS),
-        where('userId', '==', user.id),
-        where('returned', '==', false)
+    // Update books availability
+    setBooks(prev => {
+      const book = prev.find(b => b.id === bookId);
+      if (!book || book.available <= 0) return prev;
+
+      const updatedBooks = prev.map(b =>
+        b.id === bookId ? { ...b, available: b.available - 1 } : b
       );
-      const borrowedSnapshot = await getDocs(borrowedQuery);
       
-      if (borrowedSnapshot.size >= MAX_BOOKS_PER_STUDENT) {
-        return { 
-          success: false, 
-          message: `You can only borrow up to ${MAX_BOOKS_PER_STUDENT} books at a time. Please return some books first.` 
-        };
-      }
-
-      const bookRef = doc(db, COLLECTIONS.BOOKS, bookId);
-      const bookDoc = await getDoc(bookRef);
+      // Save to localStorage for persistence
+      localStorage.setItem(BOOKS_KEY, JSON.stringify(updatedBooks));
       
-      if (!bookDoc.exists()) {
-        return { success: false, message: 'Book not found.' };
-      }
+      return updatedBooks;
+    });
 
-      const bookData = bookDoc.data() as Book;
-      if (bookData.available <= 0) {
-        return { success: false, message: 'Book is not available.' };
-      }
-
+    // Update current user's borrowed books
+    setUser(prev => {
+      if (!prev) return prev;
+      
       const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + 14);
+      dueDate.setDate(dueDate.getDate() + 14); // 2 weeks from now
 
-      const borrowedBook: BorrowedBook = {
+      const newBorrowedBook: BorrowedBook = {
         bookId,
         borrowedDate: new Date().toISOString().split('T')[0],
         dueDate: dueDate.toISOString().split('T')[0],
         returned: false
       };
 
-      const batch = writeBatch(db);
-      
-      // Update book availability
-      batch.update(bookRef, { available: increment(-1) });
-      
-      // Add borrowed book record
-      const borrowedRef = doc(collection(db, COLLECTIONS.BORROWED_BOOKS));
-      batch.set(borrowedRef, {
-        ...borrowedBook,
-        userId: user.id,
-        id: borrowedRef.id
-      });
-
-      // Update user's borrowed books
-      const userRef = doc(db, COLLECTIONS.USERS, user.id);
-      batch.update(userRef, {
-        borrowedBooks: [...user.borrowedBooks, borrowedBook]
-      });
-
-      await batch.commit();
-
-      setUser(prev => prev ? {
+      const updatedUser = {
         ...prev,
-        borrowedBooks: [...prev.borrowedBooks, borrowedBook]
-      } : null);
+        borrowedBooks: [...prev.borrowedBooks, newBorrowedBook]
+      };
 
-      return { success: true };
-    } catch (error) {
-      console.error('Error renting book:', error);
-      return { success: false, message: 'An error occurred.' };
-    }
-  }, [user]);
-
-  const returnBook = useCallback(async (bookId: string) => {
-    if (!user) return;
-
-    try {
-      const batch = writeBatch(db);
-
-      // Update book availability
-      const bookRef = doc(db, COLLECTIONS.BOOKS, bookId);
-      batch.update(bookRef, { available: increment(1) });
-
-      // Find and update borrowed book record
-      const borrowedQuery = query(
-        collection(db, COLLECTIONS.BORROWED_BOOKS),
-        where('userId', '==', user.id),
-        where('bookId', '==', bookId),
-        where('returned', '==', false)
-      );
-      const borrowedSnapshot = await getDocs(borrowedQuery);
-      
-      if (!borrowedSnapshot.empty) {
-        const borrowedDoc = borrowedSnapshot.docs[0];
-        batch.update(borrowedDoc.ref, {
-          returned: true,
-          returnedDate: new Date().toISOString().split('T')[0]
-        });
+      // Update user in database
+      const db = getUserDB();
+      const userIndex = db.findIndex(u => u.id === prev.id);
+      if (userIndex >= 0) {
+        db[userIndex] = { ...db[userIndex], borrowedBooks: updatedUser.borrowedBooks };
+        localStorage.setItem(USER_DB_KEY, JSON.stringify(db));
       }
 
-      // Update user's borrowed books
-      const updatedBorrowedBooks = user.borrowedBooks.map(bb =>
+      return updatedUser;
+    });
+
+    return { success: true };
+  }, [user]);
+
+  const returnBook = useCallback((bookId: string) => {
+    // Update books availability
+    setBooks(prev => {
+      const updatedBooks = prev.map(b =>
+        b.id === bookId ? { ...b, available: Math.min(b.available + 1, b.total) } : b
+      );
+      
+      // Save to localStorage for persistence
+      localStorage.setItem(BOOKS_KEY, JSON.stringify(updatedBooks));
+      
+      return updatedBooks;
+    });
+
+    // Update current user's borrowed books
+    setUser(prev => {
+      if (!prev) return prev;
+
+      const updatedBorrowedBooks = prev.borrowedBooks.map(bb =>
         bb.bookId === bookId && !bb.returned
           ? { ...bb, returned: true, returnedDate: new Date().toISOString().split('T')[0] }
           : bb
       );
 
-      const userRef = doc(db, COLLECTIONS.USERS, user.id);
-      batch.update(userRef, { borrowedBooks: updatedBorrowedBooks });
+      const updatedUser = {
+        ...prev,
+        borrowedBooks: updatedBorrowedBooks
+      };
 
-      await batch.commit();
+      // Update user in database
+      const db = getUserDB();
+      const userIndex = db.findIndex(u => u.id === prev.id);
+      if (userIndex >= 0) {
+        db[userIndex] = { ...db[userIndex], borrowedBooks: updatedBorrowedBooks };
+        localStorage.setItem(USER_DB_KEY, JSON.stringify(db));
+      }
 
-      setUser(prev => prev ? { ...prev, borrowedBooks: updatedBorrowedBooks } : null);
-    } catch (error) {
-      console.error('Error returning book:', error);
-    }
-  }, [user]);
+      return updatedUser;
+    });
+  }, []);
 
   // Get borrowed books with full details
-  const getBorrowedBooksDetails = useCallback(async () => {
+  const getBorrowedBooksDetails = useCallback(() => {
     if (!user) return [];
     
-    try {
-      const borrowedQuery = query(
-        collection(db, COLLECTIONS.BORROWED_BOOKS),
-        where('userId', '==', user.id),
-        where('returned', '==', false)
-      );
-      const snapshot = await getDocs(borrowedQuery);
-      
-      return snapshot.docs.map(doc => {
-        const data = doc.data();
-        const book = books.find(b => b.id === data.bookId);
-        return { ...data, book } as BorrowedBook & { book: Book };
-      }).filter(item => item.book);
-    } catch (error) {
-      console.error('Error getting borrowed books:', error);
-      return [];
-    }
+    return user.borrowedBooks
+      .filter(bb => !bb.returned)
+      .map(bb => {
+        const book = books.find(b => b.id === bb.bookId);
+        return { ...bb, book };
+      })
+      .filter(item => item.book) as (BorrowedBook & { book: Book })[];
   }, [user, books]);
 
   // Filter books
@@ -577,755 +483,558 @@ export function useStore() {
   const genres = ['All', ...Array.from(new Set(books.map(b => b.genre)))];
 
   // Get due soon books (within 3 days)
-  const getDueSoonBooks = useCallback(async () => {
+  const getDueSoonBooks = useCallback(() => {
     if (!user) return [];
-    
-    try {
-      const today = new Date();
-      const threeDaysFromNow = new Date();
-      threeDaysFromNow.setDate(today.getDate() + 3);
+    const today = new Date();
+    const threeDaysFromNow = new Date();
+    threeDaysFromNow.setDate(today.getDate() + 3);
 
-      const borrowedQuery = query(
-        collection(db, COLLECTIONS.BORROWED_BOOKS),
-        where('userId', '==', user.id),
-        where('returned', '==', false)
-      );
-      const snapshot = await getDocs(borrowedQuery);
-
-      return snapshot.docs
-        .map(doc => doc.data() as BorrowedBook)
-        .filter(bb => {
-          const dueDate = new Date(bb.dueDate);
-          return dueDate <= threeDaysFromNow && dueDate >= today;
-        });
-    } catch (error) {
-      console.error('Error getting due soon books:', error);
-      return [];
-    }
+    return user.borrowedBooks.filter(bb => {
+      if (bb.returned) return false;
+      const dueDate = new Date(bb.dueDate);
+      return dueDate <= threeDaysFromNow && dueDate >= today;
+    });
   }, [user]);
 
   // Admin functions
-  const addBook = useCallback(async (bookData: BookFormData) => {
-    try {
-      const newBook: Book = {
-        id: Date.now().toString(),
-        ...bookData,
-        available: bookData.total
-      };
-      await setDoc(doc(db, COLLECTIONS.BOOKS, newBook.id), newBook);
-    } catch (error) {
-      console.error('Error adding book:', error);
-    }
+  const addBook = useCallback((bookData: BookFormData) => {
+    const newBook: Book = {
+      id: Date.now().toString(),
+      ...bookData,
+      available: bookData.total
+    };
+    setBooks(prev => {
+      const updated = [...prev, newBook];
+      localStorage.setItem(BOOKS_KEY, JSON.stringify(updated));
+      return updated;
+    });
   }, []);
 
-  const updateBook = useCallback(async (bookId: string, bookData: Partial<BookFormData>) => {
-    try {
-      const bookRef = doc(db, COLLECTIONS.BOOKS, bookId);
-      const bookDoc = await getDoc(bookRef);
-      
-      if (!bookDoc.exists()) return;
-      
-      const currentBook = bookDoc.data() as Book;
-      const updates: Partial<Book> = { ...bookData };
-
-      if (bookData.total !== undefined) {
-        const borrowed = currentBook.total - currentBook.available;
-        updates.available = Math.max(0, bookData.total - borrowed);
-      }
-
-      await updateDoc(bookRef, updates);
-    } catch (error) {
-      console.error('Error updating book:', error);
-    }
+  const updateBook = useCallback((bookId: string, bookData: Partial<BookFormData>) => {
+    setBooks(prev => {
+      const updated = prev.map(book => {
+        if (book.id !== bookId) return book;
+        
+        const newBook = { ...book, ...bookData };
+        
+        // If total is being updated, recalculate available properly
+        if (bookData.total !== undefined) {
+          // Calculate how many are currently borrowed
+          const borrowed = book.total - book.available;
+          // New available = new total - borrowed
+          newBook.available = Math.max(0, bookData.total - borrowed);
+        }
+        
+        return newBook;
+      });
+      localStorage.setItem(BOOKS_KEY, JSON.stringify(updated));
+      return updated;
+    });
   }, []);
 
-  const deleteBook = useCallback(async (bookId: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.BOOKS, bookId));
-    } catch (error) {
-      console.error('Error deleting book:', error);
-    }
+  const deleteBook = useCallback((bookId: string) => {
+    setBooks(prev => {
+      const updated = prev.filter(book => book.id !== bookId);
+      localStorage.setItem(BOOKS_KEY, JSON.stringify(updated));
+      return updated;
+    });
   }, []);
 
-  const getLibraryStats = useCallback(async (): Promise<LibraryStats> => {
-    try {
-      const booksSnapshot = await getDocs(collection(db, COLLECTIONS.BOOKS));
-      const totalBooks = booksSnapshot.docs.reduce((sum, doc) => sum + (doc.data().total || 0), 0);
-      const totalAvailable = booksSnapshot.docs.reduce((sum, doc) => sum + (doc.data().available || 0), 0);
-      const totalBorrowed = totalBooks - totalAvailable;
-
-      const today = new Date();
-      const threeDaysFromNow = new Date();
-      threeDaysFromNow.setDate(today.getDate() + 3);
-
-      const borrowedSnapshot = await getDocs(
-        query(collection(db, COLLECTIONS.BORROWED_BOOKS), where('returned', '==', false))
-      );
-
-      let overdueBooks = 0;
-      let dueSoonBooks = 0;
-
-      borrowedSnapshot.forEach(doc => {
-        const data = doc.data();
-        const dueDate = new Date(data.dueDate);
+  const getLibraryStats = useCallback((): LibraryStats => {
+    const totalBooks = books.reduce((sum, book) => sum + book.total, 0);
+    const totalAvailable = books.reduce((sum, book) => sum + book.available, 0);
+    const totalBorrowed = totalBooks - totalAvailable;
+    
+    const today = new Date();
+    const threeDaysFromNow = new Date();
+    threeDaysFromNow.setDate(today.getDate() + 3);
+    
+    // Count overdue and due soon from ALL users in database
+    let overdueBooks = 0;
+    let dueSoonBooks = 0;
+    
+    const db = getUserDB();
+    db.forEach(dbUser => {
+      dbUser.borrowedBooks.forEach(bb => {
+        if (bb.returned) return;
+        const dueDate = new Date(bb.dueDate);
         if (dueDate < today) {
           overdueBooks++;
         } else if (dueDate <= threeDaysFromNow) {
           dueSoonBooks++;
         }
       });
+    });
+    
+    return {
+      totalBooks,
+      totalBorrowed,
+      totalAvailable,
+      overdueBooks,
+      dueSoonBooks,
+      totalUsers: db.length
+    };
+  }, [books]);
 
-      const usersSnapshot = await getDocs(collection(db, COLLECTIONS.USERS));
-
-      return {
-        totalBooks,
-        totalBorrowed,
-        totalAvailable,
-        overdueBooks,
-        dueSoonBooks,
-        totalUsers: usersSnapshot.size
-      };
-    } catch (error) {
-      console.error('Error getting library stats:', error);
-      return {
-        totalBooks: 0,
-        totalBorrowed: 0,
-        totalAvailable: 0,
-        overdueBooks: 0,
-        dueSoonBooks: 0,
-        totalUsers: 0
-      };
-    }
-  }, []);
-
-  const getAllBorrowedBooks = useCallback(async () => {
-    try {
-      const borrowedSnapshot = await getDocs(
-        query(collection(db, COLLECTIONS.BORROWED_BOOKS), where('returned', '==', false))
-      );
-
-      const result: (BorrowedBook & { book: Book; userName: string })[] = [];
-
-      for (const borrowedDoc of borrowedSnapshot.docs) {
-        const borrowedData = borrowedDoc.data();
-        const book = books.find(b => b.id === borrowedData.bookId);
-        
-        if (book) {
-          const userDoc = await getDoc(doc(db, COLLECTIONS.USERS, borrowedData.userId));
-          const userName = userDoc.exists() ? (userDoc.data() as User).name : 'Unknown';
-          
-          result.push({
-            ...borrowedData,
-            book,
-            userName
-          } as BorrowedBook & { book: Book; userName: string });
-        }
-      }
-
-      return result;
-    } catch (error) {
-      console.error('Error getting all borrowed books:', error);
-      return [];
-    }
+  const getAllBorrowedBooks = useCallback(() => {
+    // Get all borrowed books from all users in the database
+    const allBorrowed: (BorrowedBook & { book: Book; userName: string })[] = [];
+    
+    const db = getUserDB();
+    
+    db.forEach(dbUser => {
+      dbUser.borrowedBooks
+        .filter(bb => !bb.returned)
+        .forEach(bb => {
+          const book = books.find(b => b.id === bb.bookId);
+          if (book) {
+            allBorrowed.push({ 
+              ...bb, 
+              book, 
+              userName: dbUser.name 
+            });
+          }
+        });
+    });
+    
+    return allBorrowed;
   }, [books]);
 
   // Announcement functions
-  const getAnnouncements = useCallback(async (): Promise<Announcement[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.ANNOUNCEMENTS));
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement));
-    } catch (error) {
-      console.error('Error getting announcements:', error);
-      return [];
-    }
+  const getAnnouncements = useCallback((): Announcement[] => {
+    const saved = localStorage.getItem(ANNOUNCEMENTS_KEY);
+    return saved ? JSON.parse(saved) : [];
   }, []);
 
-  const addAnnouncement = useCallback(async (title: string, message: string) => {
-    try {
-      const newAnnouncement: Announcement = {
-        id: Date.now().toString(),
-        title,
-        message,
-        createdAt: new Date().toISOString(),
-        active: true
-      };
-      await setDoc(doc(db, COLLECTIONS.ANNOUNCEMENTS, newAnnouncement.id), newAnnouncement);
-    } catch (error) {
-      console.error('Error adding announcement:', error);
-    }
-  }, []);
+  const addAnnouncement = useCallback((title: string, message: string) => {
+    const announcements = getAnnouncements();
+    const newAnnouncement: Announcement = {
+      id: Date.now().toString(),
+      title,
+      message,
+      createdAt: new Date().toISOString(),
+      active: true
+    };
+    announcements.push(newAnnouncement);
+    localStorage.setItem(ANNOUNCEMENTS_KEY, JSON.stringify(announcements));
+  }, [getAnnouncements]);
 
-  const updateAnnouncement = useCallback(async (id: string, updates: Partial<Announcement>) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.ANNOUNCEMENTS, id), updates);
-    } catch (error) {
-      console.error('Error updating announcement:', error);
+  const updateAnnouncement = useCallback((id: string, updates: Partial<Announcement>) => {
+    const announcements = getAnnouncements();
+    const index = announcements.findIndex(a => a.id === id);
+    if (index >= 0) {
+      announcements[index] = { ...announcements[index], ...updates };
+      localStorage.setItem(ANNOUNCEMENTS_KEY, JSON.stringify(announcements));
     }
-  }, []);
+  }, [getAnnouncements]);
 
-  const deleteAnnouncement = useCallback(async (id: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.ANNOUNCEMENTS, id));
-    } catch (error) {
-      console.error('Error deleting announcement:', error);
-    }
-  }, []);
+  const deleteAnnouncement = useCallback((id: string) => {
+    const announcements = getAnnouncements();
+    const filtered = announcements.filter(a => a.id !== id);
+    localStorage.setItem(ANNOUNCEMENTS_KEY, JSON.stringify(filtered));
+  }, [getAnnouncements]);
 
-  const getActiveAnnouncements = useCallback(async (): Promise<Announcement[]> => {
-    try {
-      const q = query(collection(db, COLLECTIONS.ANNOUNCEMENTS), where('active', '==', true));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement));
-    } catch (error) {
-      console.error('Error getting active announcements:', error);
-      return [];
-    }
-  }, []);
+  const getActiveAnnouncements = useCallback((): Announcement[] => {
+    return getAnnouncements().filter(a => a.active);
+  }, [getAnnouncements]);
 
   // User management functions
-  const getAllUsers = useCallback(async (): Promise<User[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.USERS));
-      return snapshot.docs.map(doc => {
-        const data = doc.data();
-        const { password, ...userWithoutPassword } = data;
-        return { id: doc.id, ...userWithoutPassword } as User;
-      });
-    } catch (error) {
-      console.error('Error getting users:', error);
-      return [];
-    }
+  const getAllUsers = useCallback((): User[] => {
+    const db = getUserDB();
+    return db.map(({ password: _, ...user }) => user);
   }, []);
 
-  const updateUser = useCallback(async (userId: string, updates: Partial<User>) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.USERS, userId), updates);
+  const updateUser = useCallback((userId: string, updates: Partial<User>) => {
+    const db = getUserDB();
+    const index = db.findIndex(u => u.id === userId);
+    if (index >= 0) {
+      db[index] = { ...db[index], ...updates };
+      localStorage.setItem(USER_DB_KEY, JSON.stringify(db));
+      
+      // Update current user if it's the same user
       if (user?.id === userId) {
         setUser(prev => prev ? { ...prev, ...updates } : null);
       }
-    } catch (error) {
-      console.error('Error updating user:', error);
     }
   }, [user]);
 
-  const deleteUser = useCallback(async (userId: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.USERS, userId));
-    } catch (error) {
-      console.error('Error deleting user:', error);
-    }
+  const deleteUser = useCallback((userId: string) => {
+    const db = getUserDB();
+    const filtered = db.filter(u => u.id !== userId);
+    localStorage.setItem(USER_DB_KEY, JSON.stringify(filtered));
   }, []);
 
   // Verification functions
-  const getPendingVerifications = useCallback(async (): Promise<User[]> => {
-    try {
-      const q = query(collection(db, COLLECTIONS.USERS), where('verificationPending', '==', true));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => {
-        const data = doc.data();
-        const { password, ...userWithoutPassword } = data;
-        return { id: doc.id, ...userWithoutPassword } as User;
-      });
-    } catch (error) {
-      console.error('Error getting pending verifications:', error);
-      return [];
+  const getPendingVerifications = useCallback((): User[] => {
+    const db = getUserDB();
+    return db
+      .filter(u => u.verificationPending)
+      .map(({ password: _, ...user }) => user);
+  }, []);
+
+  const approveUser = useCallback((userId: string) => {
+    const db = getUserDB();
+    const index = db.findIndex(u => u.id === userId);
+    if (index >= 0) {
+      db[index] = { 
+        ...db[index], 
+        verified: true, 
+        verificationPending: false 
+      };
+      localStorage.setItem(USER_DB_KEY, JSON.stringify(db));
     }
   }, []);
 
-  const approveUser = useCallback(async (userId: string) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.USERS, userId), {
-        verified: true,
-        verificationPending: false
-      });
-    } catch (error) {
-      console.error('Error approving user:', error);
-    }
-  }, []);
-
-  const rejectUser = useCallback(async (userId: string) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.USERS, userId), {
-        verified: false,
-        verificationPending: false
-      });
-    } catch (error) {
-      console.error('Error rejecting user:', error);
+  const rejectUser = useCallback((userId: string) => {
+    const db = getUserDB();
+    const index = db.findIndex(u => u.id === userId);
+    if (index >= 0) {
+      db[index] = { 
+        ...db[index], 
+        verified: false, 
+        verificationPending: false 
+      };
+      localStorage.setItem(USER_DB_KEY, JSON.stringify(db));
     }
   }, []);
 
   // Event management functions
-  const addEvent = useCallback(async (title: string, date: string, time: string, description: string, imageUrl?: string) => {
-    try {
-      const newEvent: Event = {
-        id: Date.now().toString(),
-        title,
-        date,
-        time,
-        description,
-        imageUrl: imageUrl || 'https://images.unsplash.com/photo-1523580494863-6f3031224c94?w=400&h=250&fit=crop'
-      };
-      await setDoc(doc(db, COLLECTIONS.EVENTS, newEvent.id), newEvent);
-    } catch (error) {
-      console.error('Error adding event:', error);
-    }
+  const addEvent = useCallback((title: string, date: string, time: string, description: string, imageUrl?: string) => {
+    const newEvent: Event = {
+      id: Date.now().toString(),
+      title,
+      date,
+      time,
+      description,
+      imageUrl: imageUrl || 'https://images.unsplash.com/photo-1523580494863-6f3031224c94?w=400&h=250&fit=crop'
+    };
+    setEvents(prev => {
+      const updated = [...prev, newEvent];
+      localStorage.setItem(EVENTS_KEY, JSON.stringify(updated));
+      return updated;
+    });
   }, []);
 
-  const updateEvent = useCallback(async (eventId: string, updates: Partial<Event>) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.EVENTS, eventId), updates);
-    } catch (error) {
-      console.error('Error updating event:', error);
-    }
+  const updateEvent = useCallback((eventId: string, updates: Partial<Event>) => {
+    setEvents(prev => {
+      const updated = prev.map(e => e.id === eventId ? { ...e, ...updates } : e);
+      localStorage.setItem(EVENTS_KEY, JSON.stringify(updated));
+      return updated;
+    });
   }, []);
 
-  const deleteEvent = useCallback(async (eventId: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.EVENTS, eventId));
-    } catch (error) {
-      console.error('Error deleting event:', error);
-    }
+  const deleteEvent = useCallback((eventId: string) => {
+    setEvents(prev => {
+      const updated = prev.filter(e => e.id !== eventId);
+      localStorage.setItem(EVENTS_KEY, JSON.stringify(updated));
+      return updated;
+    });
   }, []);
 
   // ========== ENROLLMENT SYSTEM ==========
-  const getEnrollments = useCallback(async (): Promise<Enrollment[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.ENROLLMENTS));
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Enrollment));
-    } catch (error) {
-      console.error('Error getting enrollments:', error);
-      return [];
-    }
+  const getEnrollments = useCallback((): Enrollment[] => {
+    const saved = localStorage.getItem(ENROLLMENTS_KEY);
+    return saved ? JSON.parse(saved) : [];
   }, []);
 
-  const addEnrollment = useCallback(async (studentId: string, studentName: string, gradeLevel: string, notes?: string) => {
-    try {
-      const newEnrollment: Enrollment = {
-        id: Date.now().toString(),
-        studentId,
-        studentName,
-        course: gradeLevel,
-        status: 'pending',
-        enrollmentDate: new Date().toISOString(),
-        attempts: 1,
-        notes
-      };
-      await setDoc(doc(db, COLLECTIONS.ENROLLMENTS, newEnrollment.id), newEnrollment);
-      return newEnrollment;
-    } catch (error) {
-      console.error('Error adding enrollment:', error);
-      throw error;
-    }
-  }, []);
+  const addEnrollment = useCallback((studentId: string, studentName: string, gradeLevel: string, notes?: string) => {
+    const enrollments = getEnrollments();
+    const newEnrollment: Enrollment = {
+      id: Date.now().toString(),
+      studentId,
+      studentName,
+      course: gradeLevel,
+      status: 'pending',
+      enrollmentDate: new Date().toISOString(),
+      attempts: 1,
+      notes
+    };
+    enrollments.push(newEnrollment);
+    localStorage.setItem(ENROLLMENTS_KEY, JSON.stringify(enrollments));
+    return newEnrollment;
+  }, [getEnrollments]);
 
-  const updateEnrollment = useCallback(async (id: string, updates: Partial<Enrollment>) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.ENROLLMENTS, id), updates);
-    } catch (error) {
-      console.error('Error updating enrollment:', error);
+  const updateEnrollment = useCallback((id: string, updates: Partial<Enrollment>) => {
+    const enrollments = getEnrollments();
+    const index = enrollments.findIndex(e => e.id === id);
+    if (index >= 0) {
+      enrollments[index] = { ...enrollments[index], ...updates };
+      localStorage.setItem(ENROLLMENTS_KEY, JSON.stringify(enrollments));
     }
-  }, []);
+  }, [getEnrollments]);
 
-  const deleteEnrollment = useCallback(async (id: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.ENROLLMENTS, id));
-    } catch (error) {
-      console.error('Error deleting enrollment:', error);
-    }
-  }, []);
+  const deleteEnrollment = useCallback((id: string) => {
+    const enrollments = getEnrollments();
+    const filtered = enrollments.filter(e => e.id !== id);
+    localStorage.setItem(ENROLLMENTS_KEY, JSON.stringify(filtered));
+  }, [getEnrollments]);
 
-  const getStudentEnrollments = useCallback(async (studentId: string): Promise<Enrollment[]> => {
-    try {
-      const q = query(collection(db, COLLECTIONS.ENROLLMENTS), where('studentId', '==', studentId));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Enrollment));
-    } catch (error) {
-      console.error('Error getting student enrollments:', error);
-      return [];
-    }
-  }, []);
+  const getStudentEnrollments = useCallback((studentId: string): Enrollment[] => {
+    return getEnrollments().filter(e => e.studentId === studentId);
+  }, [getEnrollments]);
 
   // ========== GRADES SYSTEM ==========
-  const getGrades = useCallback(async (): Promise<Grade[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.GRADES));
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Grade));
-    } catch (error) {
-      console.error('Error getting grades:', error);
-      return [];
-    }
+  const getGrades = useCallback((): Grade[] => {
+    const saved = localStorage.getItem(GRADES_KEY);
+    return saved ? JSON.parse(saved) : [];
   }, []);
 
-  const addGrade = useCallback(async (studentId: string, subject: string, quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4', grade: number, maxGrade: number, remarks?: string, postedBy?: string) => {
-    try {
-      const userDoc = await getDoc(doc(db, COLLECTIONS.USERS, studentId));
-      const student = userDoc.exists() ? (userDoc.data() as User) : null;
+  const addGrade = useCallback((studentId: string, subject: string, quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4', grade: number, maxGrade: number, remarks?: string, postedBy?: string) => {
+    const grades = getGrades();
+    // Get student's grade level from user database
+    const userDB = getUserDB();
+    const student = userDB.find(u => u.id === studentId);
+    const newGrade: Grade = {
+      id: Date.now().toString(),
+      studentId,
+      studentGrade: student?.grade || 'Unknown',
+      subject,
+      quarter,
+      grade,
+      maxGrade,
+      remarks,
+      datePosted: new Date().toISOString(),
+      postedBy: postedBy || 'Admin'
+    };
+    grades.push(newGrade);
+    localStorage.setItem(GRADES_KEY, JSON.stringify(grades));
+    return newGrade;
+  }, [getGrades]);
 
-      const newGrade: Grade = {
-        id: Date.now().toString(),
-        studentId,
-        studentGrade: student?.grade || 'Unknown',
-        subject,
-        quarter,
-        grade,
-        maxGrade,
-        remarks,
-        datePosted: new Date().toISOString(),
-        postedBy: postedBy || 'Admin'
-      };
-      await setDoc(doc(db, COLLECTIONS.GRADES, newGrade.id), newGrade);
-      return newGrade;
-    } catch (error) {
-      console.error('Error adding grade:', error);
-      throw error;
+  const updateGrade = useCallback((id: string, updates: Partial<Grade>) => {
+    const grades = getGrades();
+    const index = grades.findIndex(g => g.id === id);
+    if (index >= 0) {
+      grades[index] = { ...grades[index], ...updates };
+      localStorage.setItem(GRADES_KEY, JSON.stringify(grades));
     }
-  }, []);
+  }, [getGrades]);
 
-  const updateGrade = useCallback(async (id: string, updates: Partial<Grade>) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.GRADES, id), updates);
-    } catch (error) {
-      console.error('Error updating grade:', error);
-    }
-  }, []);
+  const deleteGrade = useCallback((id: string) => {
+    const grades = getGrades();
+    const filtered = grades.filter(g => g.id !== id);
+    localStorage.setItem(GRADES_KEY, JSON.stringify(filtered));
+  }, [getGrades]);
 
-  const deleteGrade = useCallback(async (id: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.GRADES, id));
-    } catch (error) {
-      console.error('Error deleting grade:', error);
-    }
-  }, []);
-
-  const getStudentGrades = useCallback(async (studentId: string): Promise<Grade[]> => {
-    try {
-      const q = query(collection(db, COLLECTIONS.GRADES), where('studentId', '==', studentId));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Grade));
-    } catch (error) {
-      console.error('Error getting student grades:', error);
-      return [];
-    }
-  }, []);
+  const getStudentGrades = useCallback((studentId: string): Grade[] => {
+    return getGrades().filter(g => g.studentId === studentId);
+  }, [getGrades]);
 
   // ========== MESSAGING SYSTEM ==========
-  const getMessages = useCallback(async (): Promise<Message[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.MESSAGES));
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
-    } catch (error) {
-      console.error('Error getting messages:', error);
-      return [];
-    }
+  const getMessages = useCallback((): Message[] => {
+    const saved = localStorage.getItem(MESSAGES_KEY);
+    return saved ? JSON.parse(saved) : [];
   }, []);
 
-  const sendMessage = useCallback(async (senderId: string, senderName: string, senderRole: 'student' | 'teacher' | 'admin', recipientId: string, recipientName: string, subject: string, content: string) => {
-    try {
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        senderId,
-        senderName,
-        senderRole,
-        recipientId,
-        recipientName,
-        subject,
-        content,
-        timestamp: new Date().toISOString(),
-        read: false
-      };
-      await setDoc(doc(db, COLLECTIONS.MESSAGES, newMessage.id), newMessage);
-      return newMessage;
-    } catch (error) {
-      console.error('Error sending message:', error);
-      throw error;
-    }
-  }, []);
+  const sendMessage = useCallback((senderId: string, senderName: string, senderRole: 'student' | 'teacher' | 'admin', recipientId: string, recipientName: string, subject: string, content: string) => {
+    const messages = getMessages();
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      senderId,
+      senderName,
+      senderRole,
+      recipientId,
+      recipientName,
+      subject,
+      content,
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+    messages.push(newMessage);
+    localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages));
+    return newMessage;
+  }, [getMessages]);
 
-  const markMessageAsRead = useCallback(async (id: string) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.MESSAGES, id), { read: true });
-    } catch (error) {
-      console.error('Error marking message as read:', error);
+  const markMessageAsRead = useCallback((id: string) => {
+    const messages = getMessages();
+    const index = messages.findIndex(m => m.id === id);
+    if (index >= 0) {
+      messages[index] = { ...messages[index], read: true };
+      localStorage.setItem(MESSAGES_KEY, JSON.stringify(messages));
     }
-  }, []);
+  }, [getMessages]);
 
-  const deleteMessage = useCallback(async (id: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.MESSAGES, id));
-    } catch (error) {
-      console.error('Error deleting message:', error);
-    }
-  }, []);
+  const deleteMessage = useCallback((id: string) => {
+    const messages = getMessages();
+    const filtered = messages.filter(m => m.id !== id);
+    localStorage.setItem(MESSAGES_KEY, JSON.stringify(filtered));
+  }, [getMessages]);
 
-  const getUserMessages = useCallback(async (userId: string): Promise<Message[]> => {
-    try {
-      const q = query(
-        collection(db, COLLECTIONS.MESSAGES),
-        where('recipientId', '==', userId)
-      );
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
-    } catch (error) {
-      console.error('Error getting user messages:', error);
-      return [];
-    }
-  }, []);
+  const getUserMessages = useCallback((userId: string): Message[] => {
+    return getMessages().filter(m => m.recipientId === userId || m.senderId === userId);
+  }, [getMessages]);
 
-  const getUnreadMessageCount = useCallback(async (userId: string): Promise<number> => {
-    try {
-      const q = query(
-        collection(db, COLLECTIONS.MESSAGES),
-        where('recipientId', '==', userId),
-        where('read', '==', false)
-      );
-      const snapshot = await getDocs(q);
-      return snapshot.size;
-    } catch (error) {
-      console.error('Error getting unread count:', error);
-      return 0;
-    }
-  }, []);
+  const getUnreadMessageCount = useCallback((userId: string): number => {
+    return getMessages().filter(m => m.recipientId === userId && !m.read).length;
+  }, [getMessages]);
 
   // ========== TICKET SYSTEM ==========
-  const getTickets = useCallback(async (): Promise<Ticket[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.TICKETS));
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Ticket));
-    } catch (error) {
-      console.error('Error getting tickets:', error);
-      return [];
-    }
+  const getTickets = useCallback((): Ticket[] => {
+    const saved = localStorage.getItem(TICKETS_KEY);
+    return saved ? JSON.parse(saved) : [];
   }, []);
 
-  const createTicket = useCallback(async (userId: string, userName: string, userEmail: string, subject: string, message: string, category: 'bug' | 'feature' | 'support' | 'other') => {
-    try {
-      const newTicket: Ticket = {
-        id: Date.now().toString(),
-        userId,
-        userName,
-        userEmail,
-        subject,
-        message,
-        category,
-        status: 'open',
-        createdAt: new Date().toISOString()
-      };
-      await setDoc(doc(db, COLLECTIONS.TICKETS, newTicket.id), newTicket);
-      return newTicket;
-    } catch (error) {
-      console.error('Error creating ticket:', error);
-      throw error;
-    }
-  }, []);
+  const createTicket = useCallback((userId: string, userName: string, userEmail: string, subject: string, message: string, category: 'bug' | 'feature' | 'support' | 'other') => {
+    const tickets = getTickets();
+    const newTicket: Ticket = {
+      id: Date.now().toString(),
+      userId,
+      userName,
+      userEmail,
+      subject,
+      message,
+      category,
+      status: 'open',
+      createdAt: new Date().toISOString()
+    };
+    tickets.push(newTicket);
+    localStorage.setItem(TICKETS_KEY, JSON.stringify(tickets));
+    return newTicket;
+  }, [getTickets]);
 
-  const updateTicket = useCallback(async (id: string, updates: Partial<Ticket>) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.TICKETS, id), updates);
-    } catch (error) {
-      console.error('Error updating ticket:', error);
+  const updateTicket = useCallback((id: string, updates: Partial<Ticket>) => {
+    const tickets = getTickets();
+    const index = tickets.findIndex(t => t.id === id);
+    if (index >= 0) {
+      tickets[index] = { ...tickets[index], ...updates };
+      localStorage.setItem(TICKETS_KEY, JSON.stringify(tickets));
     }
-  }, []);
+  }, [getTickets]);
 
-  const deleteTicket = useCallback(async (id: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.TICKETS, id));
-    } catch (error) {
-      console.error('Error deleting ticket:', error);
-    }
-  }, []);
+  const deleteTicket = useCallback((id: string) => {
+    const tickets = getTickets();
+    const filtered = tickets.filter(t => t.id !== id);
+    localStorage.setItem(TICKETS_KEY, JSON.stringify(filtered));
+  }, [getTickets]);
 
-  const getUserTickets = useCallback(async (userId: string): Promise<Ticket[]> => {
-    try {
-      const q = query(collection(db, COLLECTIONS.TICKETS), where('userId', '==', userId));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Ticket));
-    } catch (error) {
-      console.error('Error getting user tickets:', error);
-      return [];
-    }
-  }, []);
+  const getUserTickets = useCallback((userId: string): Ticket[] => {
+    return getTickets().filter(t => t.userId === userId);
+  }, [getTickets]);
 
   // ========== PROFILE SETTINGS ==========
-  const getProfileSettings = useCallback(async (): Promise<ProfileSettings> => {
-    try {
-      const docSnap = await getDoc(doc(db, COLLECTIONS.SETTINGS, 'profile'));
-      if (docSnap.exists()) {
-        return docSnap.data() as ProfileSettings;
-      }
-      return defaultProfileSettings;
-    } catch (error) {
-      console.error('Error getting profile settings:', error);
-      return defaultProfileSettings;
-    }
+  const getProfileSettings = useCallback((): ProfileSettings => {
+    const saved = localStorage.getItem(PROFILE_SETTINGS_KEY);
+    return saved ? JSON.parse(saved) : defaultProfileSettings;
   }, []);
 
-  const updateProfileSettings = useCallback(async (updates: Partial<ProfileSettings>) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.SETTINGS, 'profile'), updates);
-    } catch (error) {
-      console.error('Error updating profile settings:', error);
-    }
-  }, []);
+  const updateProfileSettings = useCallback((updates: Partial<ProfileSettings>) => {
+    const settings = getProfileSettings();
+    const updated = { ...settings, ...updates };
+    localStorage.setItem(PROFILE_SETTINGS_KEY, JSON.stringify(updated));
+  }, [getProfileSettings]);
 
   // Sections Management
-  const getSections = useCallback(async (): Promise<Section[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.SECTIONS));
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Section));
-    } catch (error) {
-      console.error('Error getting sections:', error);
-      return [];
-    }
+  const getSections = useCallback((): Section[] => {
+    const saved = localStorage.getItem(SECTIONS_KEY);
+    return saved ? JSON.parse(saved) : [];
   }, []);
 
-  const createSection = useCallback(async (name: string, grade: string, teacherId: string, teacherName: string) => {
-    try {
-      const newSection: Section = {
-        id: Date.now().toString(),
-        name,
-        grade,
-        teacherId,
-        teacherName,
-        studentIds: [],
-        createdAt: new Date().toISOString()
-      };
-      await setDoc(doc(db, COLLECTIONS.SECTIONS, newSection.id), newSection);
-    } catch (error) {
-      console.error('Error creating section:', error);
-    }
-  }, []);
+  const createSection = useCallback((name: string, grade: string, teacherId: string, teacherName: string) => {
+    const sections = getSections();
+    const newSection: Section = {
+      id: Date.now().toString(),
+      name,
+      grade,
+      teacherId,
+      teacherName,
+      studentIds: [],
+      createdAt: new Date().toISOString()
+    };
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify([...sections, newSection]));
+  }, [getSections]);
 
-  const deleteSection = useCallback(async (sectionId: string) => {
-    try {
-      await deleteDoc(doc(db, COLLECTIONS.SECTIONS, sectionId));
-    } catch (error) {
-      console.error('Error deleting section:', error);
-    }
-  }, []);
+  const deleteSection = useCallback((sectionId: string) => {
+    const sections = getSections();
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify(sections.filter(s => s.id !== sectionId)));
+  }, [getSections]);
 
-  const addStudentToSection = useCallback(async (sectionId: string, studentId: string) => {
-    try {
-      const sectionRef = doc(db, COLLECTIONS.SECTIONS, sectionId);
-      const sectionDoc = await getDoc(sectionRef);
-      if (sectionDoc.exists()) {
-        const currentStudentIds = sectionDoc.data().studentIds || [];
-        await updateDoc(sectionRef, {
-          studentIds: [...currentStudentIds, studentId]
-        });
-      }
-    } catch (error) {
-      console.error('Error adding student to section:', error);
-    }
-  }, []);
+  const addStudentToSection = useCallback((sectionId: string, studentId: string) => {
+    const sections = getSections();
+    const updated = sections.map(s => 
+      s.id === sectionId 
+        ? { ...s, studentIds: [...s.studentIds, studentId] }
+        : s
+    );
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify(updated));
+  }, [getSections]);
 
-  const removeStudentFromSection = useCallback(async (sectionId: string, studentId: string) => {
-    try {
-      const sectionRef = doc(db, COLLECTIONS.SECTIONS, sectionId);
-      const sectionDoc = await getDoc(sectionRef);
-      if (sectionDoc.exists()) {
-        const currentStudentIds = sectionDoc.data().studentIds || [];
-        await updateDoc(sectionRef, {
-          studentIds: currentStudentIds.filter((id: string) => id !== studentId)
-        });
-      }
-    } catch (error) {
-      console.error('Error removing student from section:', error);
-    }
-  }, []);
+  const removeStudentFromSection = useCallback((sectionId: string, studentId: string) => {
+    const sections = getSections();
+    const updated = sections.map(s => 
+      s.id === sectionId 
+        ? { ...s, studentIds: s.studentIds.filter(id => id !== studentId) }
+        : s
+    );
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify(updated));
+  }, [getSections]);
 
   // Attendance Management
-  const getAttendanceSessions = useCallback(async (): Promise<AttendanceSession[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.ATTENDANCE_SESSIONS));
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceSession));
-    } catch (error) {
-      console.error('Error getting attendance sessions:', error);
-      return [];
-    }
+  const getAttendanceSessions = useCallback((): AttendanceSession[] => {
+    const saved = localStorage.getItem(ATTENDANCE_SESSIONS_KEY);
+    return saved ? JSON.parse(saved) : [];
   }, []);
 
-  const getAttendanceRecords = useCallback(async (): Promise<AttendanceRecord[]> => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.ATTENDANCE_RECORDS));
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
-    } catch (error) {
-      console.error('Error getting attendance records:', error);
-      return [];
-    }
+  const getAttendanceRecords = useCallback((): AttendanceRecord[] => {
+    const saved = localStorage.getItem(ATTENDANCE_RECORDS_KEY);
+    return saved ? JSON.parse(saved) : [];
   }, []);
 
   const createAttendanceSession = useCallback(async (teacherId: string, sectionId: string, sectionName: string, expiresInMinutes: number) => {
-    try {
-      const code = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const expiresAt = Date.now() + expiresInMinutes * 60000;
-      
-      const qrData = JSON.stringify({
-        type: 'attendance',
-        sessionId: Date.now().toString(),
-        code
-      });
-      
-      const qrDataUrl = await QRCodeLib.toDataURL(qrData, {
-        width: 256,
-        margin: 2,
-        color: { dark: '#1a1a1a', light: '#ffffff' }
-      });
+    const sessions = getAttendanceSessions();
+    const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const expiresAt = Date.now() + expiresInMinutes * 60000;
+    
+    // Generate QR code data
+    const qrData = JSON.stringify({
+      type: 'attendance',
+      sessionId: Date.now().toString(),
+      code
+    });
+    
+    const qrDataUrl = await QRCodeLib.toDataURL(qrData, {
+      width: 256,
+      margin: 2,
+      color: { dark: '#1a1a1a', light: '#ffffff' }
+    });
 
-      const newSession: AttendanceSession = {
-        id: Date.now().toString(),
-        teacherId,
-        sectionId,
-        sectionName,
-        date: new Date().toISOString(),
-        qrCode: code,
-        qrDataUrl,
-        expiresAt,
-        createdAt: Date.now(),
-        isActive: true
-      };
+    const newSession: AttendanceSession = {
+      id: Date.now().toString(),
+      teacherId,
+      sectionId,
+      sectionName,
+      date: new Date().toISOString(),
+      qrCode: code,
+      qrDataUrl,
+      expiresAt,
+      createdAt: Date.now(),
+      isActive: true
+    };
 
-      await setDoc(doc(db, COLLECTIONS.ATTENDANCE_SESSIONS, newSession.id), newSession);
-    } catch (error) {
-      console.error('Error creating attendance session:', error);
-    }
-  }, []);
+    localStorage.setItem(ATTENDANCE_SESSIONS_KEY, JSON.stringify([...sessions, newSession]));
+  }, [getAttendanceSessions]);
 
-  const markAttendance = useCallback(async (sessionId: string, studentId: string, studentName: string) => {
-    try {
-      const newRecord: AttendanceRecord = {
-        id: Date.now().toString(),
-        sessionId,
-        studentId,
-        studentName,
-        date: new Date().toISOString(),
-        status: 'present',
-        scannedAt: Date.now()
-      };
-      await setDoc(doc(db, COLLECTIONS.ATTENDANCE_RECORDS, newRecord.id), newRecord);
-    } catch (error) {
-      console.error('Error marking attendance:', error);
-    }
-  }, []);
+  const markAttendance = useCallback((sessionId: string, studentId: string, studentName: string) => {
+    const records = getAttendanceRecords();
+    const newRecord: AttendanceRecord = {
+      id: Date.now().toString(),
+      sessionId,
+      studentId,
+      studentName,
+      date: new Date().toISOString(),
+      status: 'present',
+      scannedAt: Date.now()
+    };
+    localStorage.setItem(ATTENDANCE_RECORDS_KEY, JSON.stringify([...records, newRecord]));
+  }, [getAttendanceRecords]);
 
-  const cleanupExpiredSessions = useCallback(async () => {
-    try {
-      const now = Date.now();
-      const q = query(
-        collection(db, COLLECTIONS.ATTENDANCE_SESSIONS),
-        where('expiresAt', '<', now),
-        where('isActive', '==', true)
-      );
-      const snapshot = await getDocs(q);
-      
-      const batch = writeBatch(db);
-      snapshot.docs.forEach(doc => {
-        batch.update(doc.ref, { isActive: false });
-      });
-      await batch.commit();
-    } catch (error) {
-      console.error('Error cleaning up sessions:', error);
-    }
-  }, []);
+  const cleanupExpiredSessions = useCallback(() => {
+    const sessions = getAttendanceSessions();
+    const now = Date.now();
+    const updated = sessions.map(s => 
+      s.expiresAt < now ? { ...s, isActive: false } : s
+    );
+    localStorage.setItem(ATTENDANCE_SESSIONS_KEY, JSON.stringify(updated));
+  }, [getAttendanceSessions]);
 
   const isAdmin = user?.role === 'admin';
 
@@ -1337,7 +1046,6 @@ export function useStore() {
     testimonials,
     isLoggedIn,
     isAdmin,
-    loading,
     searchQuery,
     selectedGenre,
     genres,
